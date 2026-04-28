@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f1923">
+  <title>Bibelvers Quiz</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    :root {
+      --bg:#0f1923; --bg2:#162232; --bg3:#1c2c40;
+      --border:rgba(255,255,255,0.1);
+      --gold:#e6b84a; --gold-lt:#f0cc6a;
+      --text:#e8e0d0; --muted:#8a9bb0;
+      --green:#4caf6e; --yellow:#e6b84a; --red:#e05252;
+    }
+    body { background:var(--bg); color:var(--text); font-family:Georgia,serif; }
+
+    /* ── APP SHELL ── */
+    .app-root { display:flex; flex-direction:column; height:100dvh; height:100vh; overflow:hidden; }
+    .app-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 18px; background:var(--bg2); border-bottom:1px solid var(--border);
+      flex-shrink:0;
+    }
+    .header-title { font-size:1rem; color:var(--gold); }
+    .header-right { display:flex; align-items:center; gap:10px; }
+    .btn-icon {
+      background:transparent; border:1px solid var(--border); color:var(--muted);
+      width:36px; height:36px; border-radius:8px; cursor:pointer; font-size:1rem;
+      display:flex; align-items:center; justify-content:center;
+      transition:background .2s,color .2s;
+    }
+    .btn-icon:hover { background:var(--bg3); color:var(--text); }
+    .sync-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .sync-dot.idle    { background:var(--muted); }
+    .sync-dot.syncing { background:var(--yellow); animation:blink 1s infinite; }
+    .sync-dot.ok      { background:var(--green); }
+    .sync-dot.error   { background:var(--red); }
+    .sync-dot.offline { background:#666; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    .app-body { flex:1; display:flex; overflow:hidden; min-height:0; }
+
+    /* ── QUIZ PANEL ── */
+    .quiz-panel { flex:1; overflow-y:auto; padding:24px 20px; display:flex; justify-content:center; }
+    .quiz-inner { max-width:560px; width:100%; }
+    .quiz-progress { font-size:.75rem; color:var(--muted); font-family:system-ui; text-align:center; margin-bottom:18px; }
+    .ref-card {
+      background:linear-gradient(135deg,rgba(230,184,74,.1),rgba(230,184,74,.04));
+      border:1px solid rgba(230,184,74,.3); border-radius:12px;
+      padding:20px; text-align:center; margin-bottom:16px;
+    }
+    .ref-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); font-family:system-ui; margin-bottom:6px; }
+    .ref-text  { font-size:1.45rem; color:var(--gold-lt); font-style:italic; line-height:1.3; }
+    .input-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); font-family:system-ui; margin-bottom:5px; }
+    textarea {
+      width:100%; min-height:110px; background:rgba(255,255,255,.04);
+      border:1px solid var(--border); border-radius:10px; padding:12px 14px;
+      color:var(--text); font-family:Georgia,serif; font-size:1rem; line-height:1.7;
+      resize:vertical; transition:border-color .2s; margin-bottom:6px;
+    }
+    textarea:focus { outline:none; border-color:rgba(230,184,74,.5); }
+    textarea::placeholder { color:var(--muted); }
+    textarea:disabled { opacity:.5; }
+    .mic-status { font-size:.75rem; color:var(--red); font-family:system-ui; min-height:18px; margin-bottom:6px; text-align:center; }
+    .btn-row { display:flex; gap:8px; }
+    .btn-primary {
+      flex:1; background:linear-gradient(135deg,#c47d10,#e6a817); color:#1a1a0a;
+      border:none; border-radius:8px; padding:0 12px; height:48px;
+      font-size:.92rem; font-weight:bold; font-family:system-ui; cursor:pointer;
+      transition:opacity .2s,transform .12s;
+    }
+    .btn-primary:hover:not(:disabled) { opacity:.9; transform:translateY(-1px); }
+    .btn-primary:disabled { opacity:.35; cursor:not-allowed; }
+    .btn-secondary {
+      background:transparent; color:var(--muted); border:1px solid rgba(255,255,255,.15);
+      border-radius:8px; padding:0 14px; height:48px;
+      font-size:.88rem; font-family:system-ui; cursor:pointer; white-space:nowrap;
+      transition:background .2s,color .2s;
+    }
+    .btn-secondary:hover:not(:disabled) { background:rgba(255,255,255,.05); color:var(--text); }
+    .btn-secondary:disabled { opacity:.35; cursor:not-allowed; }
+    .btn-mic {
+      width:48px; height:48px; border-radius:50%; flex-shrink:0;
+      background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18);
+      color:var(--text); font-size:1.2rem; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      transition:background .2s,border-color .2s,color .2s;
+    }
+    .btn-mic:hover { background:rgba(255,255,255,.1); }
+    .btn-mic.listening { background:rgba(224,82,82,.2); border-color:var(--red); color:var(--red); animation:pulse-mic 1.2s infinite; }
+    .btn-mic:disabled { opacity:.3; cursor:not-allowed; animation:none; }
+    @keyframes pulse-mic { 0%,100%{box-shadow:0 0 0 0 rgba(224,82,82,.5)} 50%{box-shadow:0 0 0 10px rgba(224,82,82,0)} }
+
+    /* ── RESULT ── */
+    .result-panel { margin-top:20px; animation:fadeIn .4s ease; }
+    .score-banner { border-radius:12px; padding:16px; text-align:center; margin-bottom:14px; }
+    .score-banner.high { background:rgba(76,175,110,.15); border:1px solid rgba(76,175,110,.3); }
+    .score-banner.mid  { background:rgba(230,184,74,.15); border:1px solid rgba(230,184,74,.3); }
+    .score-banner.low  { background:rgba(224,82,82,.15);  border:1px solid rgba(224,82,82,.3); }
+    .score-number { font-size:2.5rem; font-weight:bold; font-family:system-ui; line-height:1; }
+    .score-banner.high .score-number { color:var(--green); }
+    .score-banner.mid  .score-number { color:var(--yellow); }
+    .score-banner.low  .score-number { color:var(--red); }
+    .score-msg    { font-size:.9rem; margin-top:4px; font-family:system-ui; }
+    .score-detail { font-size:.8rem; color:var(--muted); margin-top:3px; font-family:system-ui; }
+    .diff-block { margin-bottom:12px; }
+    .diff-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); font-family:system-ui; margin-bottom:5px; }
+    .diff-text  { background:rgba(255,255,255,.04); border:1px solid var(--border); border-radius:10px; padding:14px 16px; font-size:.95rem; line-height:2.2; }
+    .w-ok    { color:#5ecb7c; }
+    .w-miss  { background:rgba(224,82,82,.28); color:#ff8080; border-radius:4px; padding:2px 5px; font-weight:bold; }
+    .w-extra { background:rgba(230,140,40,.22); color:#e8954a; text-decoration:line-through; border-radius:4px; padding:2px 5px; }
+    .diff-legend { display:flex; gap:14px; margin-bottom:10px; font-family:system-ui; font-size:.73rem; color:var(--muted); flex-wrap:wrap; }
+    .legend-sw { display:inline-block; width:26px; height:12px; border-radius:3px; margin-right:4px; vertical-align:middle; }
+    .legend-sw.ok    { background:rgba(94,203,124,.25); border:1px solid #5ecb7c; }
+    .legend-sw.miss  { background:rgba(224,82,82,.28);  border:1px solid #ff8080; }
+    .legend-sw.extra { background:rgba(230,140,40,.22); border:1px solid #e8954a; }
+    .btn-next {
+      width:100%; background:transparent; color:var(--gold);
+      border:1px solid rgba(230,184,74,.4); border-radius:8px;
+      height:48px; font-size:.92rem; font-family:system-ui; cursor:pointer;
+      transition:background .2s;
+    }
+    .btn-next:hover { background:rgba(230,184,74,.08); }
+
+    /* ── HISTORY PANEL ── */
+    .history-panel {
+      width:290px; min-width:290px; background:var(--bg2);
+      border-left:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden;
+    }
+    .history-header { padding:13px 15px; border-bottom:1px solid var(--border); font-size:.7rem; text-transform:uppercase; letter-spacing:.1em; color:var(--gold); font-family:system-ui; flex-shrink:0; }
+    .history-list   { flex:1; overflow-y:auto; padding:5px; }
+    .history-empty  { padding:18px; color:var(--muted); font-family:system-ui; font-size:.8rem; text-align:center; }
+    .history-item   { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:8px; }
+    .history-item:hover { background:rgba(255,255,255,.04); }
+    .history-item.newest { background:rgba(230,184,74,.12); box-shadow:inset 3px 0 0 rgba(230,184,74,.8); }
+    .h-scores { display:flex; flex-direction:column; align-items:center; gap:3px; flex-shrink:0; }
+    .h-score {
+      width:46px; height:26px; border-radius:5px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:.73rem; font-weight:bold; font-family:system-ui;
+    }
+    .h-score.high { background:rgba(76,175,110,.15); color:var(--green); border:1px solid rgba(76,175,110,.35); }
+    .h-score.mid  { background:rgba(230,184,74,.15); color:var(--yellow); border:1px solid rgba(230,184,74,.35); }
+    .h-score.low  { background:rgba(224,82,82,.15);  color:var(--red);  border:1px solid rgba(224,82,82,.35); }
+    .h-score-adj {
+      width:46px; height:20px; border-radius:4px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:.63rem; font-weight:bold; font-family:system-ui;
+    }
+    .h-score-adj.high { background:rgba(76,175,110,.1);  color:#3a9e58; }
+    .h-score-adj.mid  { background:rgba(230,184,74,.1);  color:#c09030; }
+    .h-score-adj.low  { background:rgba(224,82,82,.1);   color:#c03030; }
+    .h-info { flex:1; min-width:0; }
+    .h-ref  { font-size:.78rem; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .h-date { font-size:.63rem; color:var(--muted); margin-top:1px; font-family:system-ui; }
+
+    /* ── FLY CHIP ── */
+    .fly-chip {
+      position:fixed; left:0; top:0; z-index:9999; pointer-events:none;
+      width:50px; height:50px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      font-family:system-ui; font-weight:bold; font-size:.78rem;
+      box-shadow:0 4px 20px rgba(0,0,0,.5);
+    }
+    .fly-chip.high  { background:#2e8c4e; color:#fff; }
+    .fly-chip.mid   { background:#b07d08; color:#fff; }
+    .fly-chip.low   { background:#b83030; color:#fff; }
+    .fly-chip.shown { background:#444;    color:#ccc; }
+
+    /* ── SETTINGS MODAL ── */
+    .modal-overlay {
+      position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.75);
+      display:flex; align-items:center; justify-content:center; padding:16px;
+    }
+    .modal { background:var(--bg2); border:1px solid var(--border); border-radius:14px; width:100%; max-width:440px; max-height:90vh; overflow-y:auto; }
+    .modal-head { display:flex; justify-content:space-between; align-items:center; padding:18px 22px 14px; border-bottom:1px solid var(--border); }
+    .modal-head h2 { font-size:1rem; color:var(--gold); }
+    .modal-close { background:none; border:none; color:var(--muted); font-size:1.1rem; cursor:pointer; }
+    .modal-body { padding:18px 22px; }
+    .modal-body h3 { font-size:.85rem; color:var(--text); margin-bottom:7px; font-family:system-ui; font-weight:600; }
+    .modal-body p  { font-size:.8rem; color:var(--muted); font-family:system-ui; line-height:1.55; margin-bottom:12px; }
+    .modal-body p a { color:var(--gold); }
+    .setup-steps { font-size:.8rem; color:var(--muted); font-family:system-ui; padding-left:18px; margin-bottom:16px; line-height:2.1; }
+    .setup-steps code { background:rgba(255,255,255,.08); padding:1px 5px; border-radius:3px; font-family:monospace; color:var(--text); }
+    .modal-body label { display:block; font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-family:system-ui; margin-bottom:5px; margin-top:13px; }
+    .modal-body input {
+      width:100%; background:rgba(255,255,255,.05); border:1px solid var(--border);
+      border-radius:8px; padding:10px 12px; color:var(--text); font-family:system-ui; font-size:.88rem;
+    }
+    .modal-body input:focus { outline:none; border-color:rgba(230,184,74,.5); }
+    .modal-btns { display:flex; gap:8px; margin-top:16px; }
+    .btn-modal-save {
+      background:linear-gradient(135deg,#c47d10,#e6a817); color:#1a1a0a;
+      border:none; border-radius:8px; padding:10px 18px;
+      font-size:.88rem; font-weight:bold; font-family:system-ui; cursor:pointer;
+    }
+    .btn-modal-test {
+      background:transparent; color:var(--muted); border:1px solid var(--border);
+      border-radius:8px; padding:10px 14px; font-size:.88rem; font-family:system-ui; cursor:pointer;
+      transition:background .2s;
+    }
+    .btn-modal-test:hover { background:rgba(255,255,255,.05); color:var(--text); }
+    .cfg-status { font-size:.78rem; font-family:system-ui; margin-top:9px; min-height:18px; }
+    .cfg-status.ok      { color:var(--green); }
+    .cfg-status.error   { color:var(--red); }
+    .cfg-status.loading { color:var(--yellow); }
+
+    /* ── MISC ── */
+    .hidden { display:none !important; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    ::-webkit-scrollbar { width:5px; }
+    ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.12); border-radius:3px; }
+
+    /* ── MOBILE ── */
+    @media (max-width:700px) {
+      .app-root { height:auto; overflow:visible; min-height:100vh; }
+      .app-body { flex-direction:column; overflow:visible; }
+      .quiz-panel { overflow:visible; padding:16px 14px; }
+      .ref-text { font-size:1.25rem; }
+      textarea { font-size:16px; }   /* prevents iOS zoom */
+      .history-panel { width:100%; min-width:0; border-left:none; border-top:1px solid var(--border); max-height:300px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Settings modal -->
+<div class="modal-overlay hidden" id="settings-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Innstillinger</h2>
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+      <h3>Cloud-synkronisering</h3>
+      <p>Lagre historikken online for å fortsette på andre enheter. Gratis med <a href="https://jsonbin.io" target="_blank" rel="noopener">JSONBin.io</a>.</p>
+      <ol class="setup-steps">
+        <li>Opprett gratis konto på <a href="https://jsonbin.io" target="_blank" rel="noopener">jsonbin.io</a></li>
+        <li>Klikk «New Bin», lim inn <code>{"init":true}</code>, klikk «Create Bin»</li>
+        <li>Kopier Bin-IDen fra URL-en</li>
+        <li>Gå til «API Keys» og kopier Master Key</li>
+      </ol>
+      <label>Bin ID</label>
+      <input type="text" id="cfg-bin-id" placeholder="66xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+      <label>Master Key</label>
+      <input type="password" id="cfg-api-key" placeholder="$2b$10$..." autocomplete="off">
+      <div class="modal-btns">
+        <button class="btn-modal-test" onclick="testConnection()">Test tilkobling</button>
+        <button class="btn-modal-save" onclick="saveSettings()">Lagre</button>
+      </div>
+      <div id="cfg-status" class="cfg-status"></div>
+    </div>
+  </div>
+</div>
+
+<div class="app-root">
+  <header class="app-header">
+    <span class="header-title">✝ Bibelvers Quiz</span>
+    <div class="header-right">
+      <span class="sync-dot idle" id="sync-dot" title="Synkroniseringsstatus"></span>
+      <button class="btn-icon" onclick="openSettings()" title="Innstillinger">⚙</button>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <main class="quiz-panel">
+      <div class="quiz-inner">
+        <div class="quiz-progress" id="progress">Laster…</div>
+        <div class="ref-card">
+          <div class="ref-label">Bibelreferanse</div>
+          <div class="ref-text" id="reference">…</div>
+        </div>
+        <div class="input-label">Ditt svar</div>
+        <textarea id="user-input" placeholder="Skriv inn verset fra hukommelsen… (Ctrl+Enter for å sjekke)" rows="5"></textarea>
+        <div class="mic-status" id="mic-status"></div>
+        <div class="btn-row">
+          <button class="btn-mic" id="mic-btn" onclick="toggleMic()" title="Tal inn verset">🎤</button>
+          <button class="btn-primary" id="submit-btn" onclick="submitAnswer()">Sjekk svar</button>
+          <button class="btn-secondary" id="reveal-btn" onclick="revealAnswer()">Vis svar</button>
+        </div>
+
+        <div class="result-panel hidden" id="result-panel">
+          <div class="score-banner" id="score-banner">
+            <div class="score-number" id="score-number"></div>
+            <div class="score-msg"    id="score-msg"></div>
+            <div class="score-detail" id="score-detail"></div>
+          </div>
+          <div id="diff-section">
+            <div class="diff-legend">
+              <span><span class="legend-sw ok"></span>Riktig ord</span>
+              <span><span class="legend-sw miss"></span>Manglet</span>
+              <span><span class="legend-sw extra"></span>Feil/ekstra</span>
+            </div>
+            <div class="diff-block">
+              <div class="diff-label">Riktig vers</div>
+              <div class="diff-text" id="diff-correct"></div>
+            </div>
+            <div class="diff-block" id="diff-user-block">
+              <div class="diff-label">Ditt svar</div>
+              <div class="diff-text" id="diff-user"></div>
+            </div>
+          </div>
+          <button class="btn-next" onclick="nextVerse()">Neste vers →</button>
+        </div>
+      </div>
+    </main>
+
+    <aside class="history-panel">
+      <div class="history-header">Historikk</div>
+      <div class="history-list" id="history-list">
+        <div class="history-empty">Ingen vers forsøkt ennå</div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+// ── CONFIG / CLOUD ──
+
+const LOCAL_KEY  = 'bibelvers-history-v2';
+const CONFIG_KEY = 'bibelvers-config-v1';
+
+function getConfig() {
+  try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || 'null'); } catch { return null; }
+}
+function setConfig(cfg) { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); }
+
+function setSyncStatus(s) {
+  const d = document.getElementById('sync-dot');
+  d.className = 'sync-dot ' + s;
+  d.title = { idle:'Ikke konfigurert', syncing:'Synkroniserer…', ok:'Synkronisert', error:'Feil', offline:'Frakoblet' }[s] || s;
+}
+
+async function cloudLoad() {
+  const cfg = getConfig();
+  if (!cfg?.binId || !cfg?.apiKey) return false;
+  setSyncStatus('syncing');
+  try {
+    const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, {
+      headers: { 'X-Master-Key': cfg.apiKey }
+    });
+    if (!r.ok) { setSyncStatus('error'); return false; }
+    const cloud = (await r.json()).record || {};
+    let changed = false;
+    for (const [ref, entry] of Object.entries(cloud)) {
+      if (!entry || typeof entry !== 'object' || typeof entry.score !== 'number') continue;
+      if (!history[ref] || (entry.timestamp || 0) > (history[ref].timestamp || 0)) {
+        history[ref] = entry; changed = true;
+      }
+    }
+    if (changed) saveHistory();
+    setSyncStatus('ok');
+    return true;
+  } catch { setSyncStatus('offline'); return false; }
+}
+
+async function cloudSave() {
+  const cfg = getConfig();
+  if (!cfg?.binId || !cfg?.apiKey) return;
+  setSyncStatus('syncing');
+  try {
+    const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.apiKey },
+      body: JSON.stringify(history)
+    });
+    setSyncStatus(r.ok ? 'ok' : 'error');
+  } catch { setSyncStatus('offline'); }
+}
+
+// ── SETTINGS ──
+
+function openSettings() {
+  const cfg = getConfig();
+  document.getElementById('cfg-bin-id').value  = cfg?.binId  || '';
+  document.getElementById('cfg-api-key').value = cfg?.apiKey || '';
+  document.getElementById('cfg-status').textContent = '';
+  document.getElementById('cfg-status').className = 'cfg-status';
+  document.getElementById('settings-modal').classList.remove('hidden');
+}
+function closeSettings() { document.getElementById('settings-modal').classList.add('hidden'); }
+
+function saveSettings() {
+  const binId  = document.getElementById('cfg-bin-id').value.trim();
+  const apiKey = document.getElementById('cfg-api-key').value.trim();
+  if (!binId || !apiKey) { showCfgStatus('Fyll inn begge feltene.', 'error'); return; }
+  setConfig({ binId, apiKey });
+  closeSettings();
+  cloudLoad().then(() => { renderHistory(null); updateProgress(); });
+}
+
+async function testConnection() {
+  const binId  = document.getElementById('cfg-bin-id').value.trim();
+  const apiKey = document.getElementById('cfg-api-key').value.trim();
+  if (!binId || !apiKey) { showCfgStatus('Fyll inn begge feltene.', 'error'); return; }
+  showCfgStatus('Tester…', 'loading');
+  try {
+    const r = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, { headers:{'X-Master-Key':apiKey} });
+    if      (r.ok)           showCfgStatus('✓ Tilkobling vellykket!', 'ok');
+    else if (r.status===401) showCfgStatus('Feil API-nøkkel.', 'error');
+    else if (r.status===404) showCfgStatus('Bin-ID ikke funnet.', 'error');
+    else                     showCfgStatus(`Feil ${r.status}.`, 'error');
+  } catch { showCfgStatus('Frakoblet – sjekk internett.', 'error'); }
+}
+
+function showCfgStatus(msg, type) {
+  const el = document.getElementById('cfg-status');
+  el.textContent = msg; el.className = 'cfg-status ' + type;
+}
+
+// ── LOCAL STORAGE ──
+
+let history = {};
+
+function loadHistory() {
+  try { history = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}'); } catch { history = {}; }
+}
+function saveHistory() { localStorage.setItem(LOCAL_KEY, JSON.stringify(history)); }
+
+// ── TIME-ADJUSTED SCORE ──
+
+function getAdjustedScore(entry) {
+  if (!entry?.score) return 0;
+  // Parse stored date "dd.mm.yyyy" for a calendar-day comparison
+  let submitted;
+  if (entry.date) {
+    const [d, m, y] = entry.date.split('.').map(Number);
+    submitted = new Date(y, m - 1, d);
+  } else if (entry.timestamp) {
+    const t = new Date(entry.timestamp);
+    submitted = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  } else {
+    return entry.score;
+  }
+  const today = new Date();
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const days = Math.round((todayMidnight - submitted) / 86400000);
+  return Math.max(0, entry.score - days);
+}
+
+// ── VERSES ──
+
+const verses = [
+  { ref:"1 Mosebok 1:1", text:"I begynnelsen skapte Gud himmelen og jorden." },
+  { ref:"4 Mosebok 6:24-26", text:"Herren velsigne deg og bevare deg! Herren la sitt ansikt lyse over deg og være deg nådig! Herren løfte sitt åsyn på deg og gi deg fred!" },
+  { ref:"5. Mosebok 33:25", text:"Som dine dager er, skal din styrke være." },
+  { ref:"Josva 1:9", text:"Jeg har jo sagt deg: Vær modig og sterk! La deg ikke skremme, og mist ikke motet! For Herren din Gud er med deg overalt hvor du går." },
+  { ref:"Salmene 23:1-2", text:"Herren er min hyrde, det mangler meg ingen ting. Han lar meg ligge i grønne enger, han leder meg til hvilens vann." },
+  { ref:"Salmene 119:105", text:"Ditt ord er en lykt for min fot og et lys for min sti." },
+  { ref:"Salmene 139:14", text:"Jeg takker deg for at jeg er så underfullt laget. Underfulle er dine verk, det vet jeg godt." },
+  { ref:"Ordspråkene 3:5-6", text:"Stol på Herren av hele ditt hjerte, støtt deg ikke til din egen innsikt! Tenk på ham hvor du enn ferdes, så gjør han stiene dine jevne." },
+  { ref:"Salomos Ordspråk 4:23", text:"Bevar ditt hjerte fremfor alt du bevarer, for livet utgår fra det." },
+  { ref:"Jesaja 41:10", text:"Frykt ikke, for jeg er med deg, vær ikke redd, for jeg er din Gud! Jeg gjør deg sterk og hjelper deg og holder deg oppe med min rettferds høyre hånd." },
+  { ref:"Jeremia 17:7-8", text:"Velsignet er den mann som stoler på Herren og setter sin lit til ham. Han er lik et tre som er plantet ved vann og strekker røttene mot bekken. Det frykter ikke når heten kommer, løvet er grønt. Det engster seg ikke i tørketider og slutter ikke å bære frukt." },
+  { ref:"Jeremia 29:11", text:"For jeg vet hvilke tanker jeg har med deg, sier Herren. Fredstanker, og ikke ulykkestanker. Jeg vil gi dere fremtid og håp." },
+  { ref:"Sefanja 3:17", text:"Herren din Gud er hos deg, en helt som frelser. Han fryder og gleder seg over deg og viser deg på ny sin kjærlighet. Han jubler over deg med fryd." },
+  { ref:"Sakarja 14:9", text:"Da skal Herren bli konge over hele jorden. På den dagen skal Herren være én og hans navn ett." },
+  { ref:"Matteus 5:38-39", text:"Dere har hørt det er sagt: Øye for øye, og tann for tann! Men jeg sier dere: Sett dere ikke imot den som gjør det onde mot dere. Om noen slår deg på høyre kinn, så vend også det andre til." },
+  { ref:"Matteus 6:9-13", text:"Vår Far i himmelen! La navnet ditt helliges. La riket ditt komme. La viljen din skje på jorden slik som i himmelen. Gi oss i dag vårt daglige brød, og tilgi oss vår skyld, slik også vi tilgir våre skyldnere. Og la oss ikke komme i fristelse, men frels oss fra det onde. For riket er ditt og makten og æren i evighet. Amen." },
+  { ref:"Matteus 6:33-34", text:"Søk først Guds rike og hans rettferdighet, så skal dere få alt det andre i tillegg. Så gjør dere ingen bekymringer for morgendagen; morgendagen skal bekymre seg for seg selv. Hver dag har nok med sin egen plage." },
+  { ref:"Matteus 7:12", text:"Alt dere vil at andre skal gjøre mot dere, det skal også dere gjøre mot dem. For dette er loven og profetene." },
+  { ref:"Matteus 11:28-30", text:"Kom til meg, alle som strever og har tungt å bære, og jeg vil gi dere hvile! Ta mitt åk på dere og lær av meg, for jeg er nedbøyd og ydmyk av hjertet. Så skal dere finne hvile for deres sjeler. For mitt åk er gagnlig, og min byrde er lett." },
+  { ref:"Matteus 24:35", text:"Himmel og jord skal forgå, men mine ord skal aldri forgå." },
+  { ref:"Matteus 25:35-40", text:"For jeg var sulten, og dere ga meg mat; jeg var tørst, og dere ga meg drikke; jeg var fremmed, og dere tok imot meg; jeg var naken, og dere kledde meg; jeg var syk, og dere så til meg; jeg var i fengsel, og dere besøkte meg. Sannelig, jeg sier dere: Det dere gjorde mot én av disse mine minste søsken, har dere gjort mot meg." },
+  { ref:"Matteus 28:18-20", text:"Jeg har fått all makt i himmelen og på jorden. Gå derfor og gjør alle folkeslag til disipler: Døp dem til Faderens og Sønnens og Den hellige ånds navn og lær dem å holde alt det jeg har befalt dere. Og se, jeg er med dere alle dager inntil verdens ende." },
+  { ref:"Markus 12:30-31", text:"Du skal elske Herren din Gud av hele ditt hjerte og av hele din sjel og av all din fornuft og av all din makt. Dette er det første budet. Det andre, som er like stort, er dette: Du skal elske din neste som deg selv! Det finnes ikke noe annet bud som er større enn disse." },
+  { ref:"Lukas 23:34", text:"Far, tilgi dem, for de vet ikke hva de gjør." },
+  { ref:"Lukas 24:45", text:"Da åpnet han deres forstand så de kunne forstå skriftene." },
+  { ref:"Johannes 1:1-5", text:"I begynnelsen var Ordet. Ordet var hos Gud, og Ordet var Gud. Han var i begynnelsen hos Gud. Alt er blitt til ved ham, uten ham er ikke noe blitt til. Det som ble til i ham, var liv, og livet var menneskenes lys. Lyset skinner i mørket, og mørket har ikke overvunnet det." },
+  { ref:"Johannes 3:16-18", text:"For så høyt har Gud elsket verden at han gav sin Sønn, den enbårne, for at hver den som tror på ham, ikke skal gå fortapt, men ha evig liv. Gud sendte ikke sin Sønn til verden for å dømme verden, men for at verden skulle bli frelst ved ham. Den som tror på ham, blir ikke dømt. Den som ikke tror, er allerede dømt, fordi han ikke har trodd på Guds enbårne Sønns navn." },
+  { ref:"Johannes 10:10", text:"Tyven kommer bare for å stjele, drepe og ødelegge. Jeg er kommet for at dere skal ha liv og overflod." },
+  { ref:"Johannes 11:25", text:"Jeg er oppstandelsen og livet. Den som tror på meg, skal leve om han enn dør." },
+  { ref:"Johannes 13:34-35", text:"Et nytt bud gir jeg dere: Dere skal elske hverandre! Som jeg har elsket dere, skal også dere elske hverandre. Av dette skal alle kjenne at dere er mine disipler, om dere har kjærlighet til hverandre." },
+  { ref:"Johannes 14:6", text:"Jeg er veien, sannheten og livet. Ingen kommer til Far uten ved meg." },
+  { ref:"Johannes 14:27", text:"Fred etterlater jeg dere, min fred gir jeg dere, ikke den fred som verden gir. La ikke hjertet bli grepet av angst og motløshet." },
+  { ref:"Apostlenes gjerninger 18:9-11", text:"Vær ikke redd! Du skal ikke tie, men tale. Jeg er med deg, og ingen skal røre deg eller gjøre deg noe vondt, for i denne byen har jeg et tallrikt folk. Så ble han der halvannet år og lærte dem Guds ord." },
+  { ref:"Romerne 3:22-24", text:"Dette er Guds rettferdighet som gis ved troen på Jesus Kristus til alle som tror. Her er det ingen forskjell, for alle har syndet og mangler Guds herlighet. Men ufortjent og av hans nåde blir de kjent rettferdige, frikjøpt i Kristus Jesus." },
+  { ref:"Romerne 6:1-2", text:"Hva skal vi da si? Skal vi fortsette å synde så nåden kan bli enda større? Slett ikke! Hvordan kan vi som døde bort fra synden, fremdeles leve i den?" },
+  { ref:"Romerne 8:28", text:"Vi vet at alle ting tjener til det gode for dem som elsker Gud, dem han har kalt etter sin frie vilje." },
+  { ref:"Romerne 10:17", text:"Så kommer da troen av det budskapet en hører, og budskapet kommer av Kristi ord." },
+  { ref:"Romerne 12:1-2", text:"Bær kroppen fram som et levende og hellig offer til glede for Gud. Det skal være deres åndelige gudstjeneste. Innrett dere ikke etter den nåværende verden, men la dere forvandle ved at sinnet fornyes, så dere kan dømme om hva som er Guds vilje: det gode, det som er til glede for Gud, det fullkomne." },
+  { ref:"1. Korinter 12:4-11", text:"Det er forskjellige nådegaver, men Ånden er den samme. Det er forskjellige tjenester, men Herren er den samme. Det er forskjellige kraftige virkninger, men Gud er den samme, han som er virksom og gjør alt i alle. Hos hver enkelt gir Ånden seg til kjenne slik at det tjener til det gode. For ved én og samme Ånd blir det gitt én å tale visdom, en annen å formidle kunnskap, én får ved den ene Ånd en spesiell trosgave, en annen får nådegaver til å helbrede, og én får kraft til å gjøre under. Én får den gave å tale profetisk, en annen å bedømme ånder, én får ulike slag av tungetale, og en annen kan tyde tungetale. Alt dette gjør den ene og samme Ånd, som deler ut sine gaver til hver enkelt slik han vil." },
+  { ref:"1. Korinter 13:1-13", text:"Om jeg taler med menneskers og englers tunger, men ikke har kjærlighet, da er jeg bare drønnende malm eller en klingende bjelle. Om jeg har profetisk gave, kjenner alle hemmeligheter og eier all kunnskap, om jeg har all tro så jeg kan flytte fjell, men ikke har kjærlighet, da er jeg intet. Om jeg gir alt jeg eier til brød for de fattige, ja, om jeg gir meg selv til å brennes, men ikke har kjærlighet, da har jeg ingen ting vunnet. Kjærligheten er tålmodig, kjærligheten er velvillig, den misunner ikke, skryter ikke, er ikke hovmodig. Kjærligheten krenker ikke, søker ikke sitt eget, er ikke oppfarende og gjemmer ikke på det onde. Den gleder seg ikke over urett, men har sin glede i sannheten. Kjærligheten utholder alt, tror alt, håper alt, tåler alt. Kjærligheten tar aldri slutt. Profetgavene skal bli borte, tungene skal tie og kunnskapen forgå. For vi forstår stykkevis og taler profetisk stykkevis. Men når det fullkomne kommer, skal det som er stykkevis, ta slutt. Da jeg var barn, talte jeg som et barn, tenkte jeg som et barn, forsto jeg som et barn. Men da jeg ble voksen, la jeg av det barnslige. Nå ser vi i et speil, i en gåte, da skal vi se ansikt til ansikt. Nå forstår jeg stykkevis, da skal jeg erkjenne fullt ut, slik Gud kjenner meg fullt ut. Så blir de stående, disse tre: tro, håp og kjærlighet. Men størst blant dem er kjærligheten." },
+  { ref:"Galaterne 5:22-23", text:"Åndens frukt er kjærlighet, glede, fred, overbærenhet, vennlighet, godhet, trofasthet, ydmykhet og selvbeherskelse. Slike ting rammes ikke av loven!" },
+  { ref:"Efeserne 2:8-10", text:"For av nåde er dere frelst, ved tro. Det er ikke deres eget verk, men Guds gave. Det hviler ikke på gjerninger, for at ingen skal skryte av seg selv. For vi er hans verk, skapt i Kristus Jesus til gode gjerninger, som Gud på forhånd har lagt ferdige for at vi skulle vandre i dem." },
+  { ref:"Efeserne 4:11-13", text:"Og det var han som ga noen til å være apostler, noen til profeter, noen til evangelister og noen til hyrder og lærere, for å utruste de hellige til tjeneste så Kristi kropp bygges opp, inntil vi alle når fram til enheten i troen på Guds Sønn og i kjennskapet til ham og blir det modne mennesket som er fullvoksent og har hele Kristi fylde." },
+  { ref:"Filipperne 4:6", text:"Vær ikke bekymret for noe! Men la alt som ligger dere på hjertet, komme fram for Gud i bønn og påkallelse med takk!" },
+  { ref:"Filipperne 4:13", text:"Alt makter jeg i ham som gjør meg sterk." },
+  { ref:"1. Timoteus 6:10", text:"For kjærligheten til penger er roten til alt ondt. Drevet av den er mange ført vill, bort fra troen, og har påført seg selv mange lidelser." },
+  { ref:"2. Timoteus 2:13", text:"Er vi troløse, så er han trofast, for han kan ikke fornekte seg selv." },
+  { ref:"1. Johannes 1:5-10", text:"Dette er budskapet vi har hørt av ham og forkynner for dere: Gud er lys, det finnes ikke mørke i ham. Sier vi at vi har fellesskap med ham, men vandrer i mørket, da lyver vi og følger ikke sannheten. Men dersom vi vandrer i lyset, slik han selv er i lyset, da har vi fellesskap med hverandre, og blodet fra Jesus, hans Sønn, renser oss for all synd. Sier vi at vi ikke har synd, da bedrar vi oss selv, og sannheten er ikke i oss. Men dersom vi bekjenner våre synder, er han trofast og rettferdig, så han tilgir oss syndene og renser oss for all urett. Sier vi at vi ikke har syndet, gjør vi ham til en løgner, og hans ord er ikke i oss." }
+];
+
+// ── VERSE SELECTION ──
+
+function selectNextVerse() {
+  const untried = verses.filter(v => !history[v.ref] && v.ref !== currentVerse?.ref);
+  if (untried.length > 0) return untried[Math.floor(Math.random() * untried.length)];
+  const sorted = verses
+    .filter(v => v.ref !== currentVerse?.ref)
+    .map(v => ({ v, adj: getAdjustedScore(history[v.ref]) }))
+    .sort((a, b) => a.adj - b.adj);
+  const pool = sorted.slice(0, Math.min(5, sorted.length));
+  return pool[Math.floor(Math.random() * pool.length)].v;
+}
+
+// ── SCORING ──
+
+function normalize(t) {
+  return t.toLowerCase()
+    .replace(/\[\d+\]/g,' ').replace(/[«»""'']/g,'')
+    .replace(/[.,!?;:\-–—{}()[\]]/g,' ').replace(/\s+/g,' ').trim();
+}
+function wordFreq(t) {
+  const f={};
+  for (const w of t.split(' ').filter(Boolean)) f[w]=(f[w]||0)+1;
+  return f;
+}
+function scoreVerse(userText, correctText) {
+  const u=normalize(userText), c=normalize(correctText);
+  if (!u) return {score:0,matched:0,total:0};
+  if (u===c) { const n=c.split(' ').filter(Boolean).length; return {score:100,matched:n,total:n}; }
+  const uF=wordFreq(u), cF=wordFreq(c);
+  const cW=c.split(' ').filter(Boolean), uW=u.split(' ').filter(Boolean);
+  let matched=0;
+  for (const [w,cnt] of Object.entries(uF)) if (cF[w]) matched+=Math.min(cnt,cF[w]);
+  const recall=cW.length?matched/cW.length:0, prec=uW.length?matched/uW.length:0;
+  return { score:Math.min(100,Math.max(0,Math.round((recall*.75+prec*.25)*100))), matched, total:cW.length };
+}
+
+// ── DIFF ──
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function tokenize(text) {
+  return text.split(/\s+/).filter(Boolean)
+    .map(w=>({orig:w, norm:w.toLowerCase().replace(/[«»""''.,!?;:\-–—{}()[\]]/g,'')}))
+    .filter(t=>t.norm.length>0);
+}
+function lcsOps(uN,cN) {
+  const m=uN.length,n=cN.length;
+  const dp=Array.from({length:m+1},()=>new Uint16Array(n+1));
+  for (let i=1;i<=m;i++) for (let j=1;j<=n;j++)
+    dp[i][j]=uN[i-1]===cN[j-1]?dp[i-1][j-1]+1:Math.max(dp[i-1][j],dp[i][j-1]);
+  const ops=[]; let i=m,j=n;
+  while (i>0||j>0) {
+    if (i>0&&j>0&&uN[i-1]===cN[j-1]) { ops.unshift({type:'equal',ui:i-1,ci:j-1}); i--;j--; }
+    else if (j>0&&(i===0||dp[i][j-1]>=dp[i-1][j])) { ops.unshift({type:'insert',ci:j-1}); j--; }
+    else { ops.unshift({type:'delete',ui:i-1}); i--; }
+  }
+  return ops;
+}
+function buildDiff(userText,correctText) {
+  const uT=tokenize(userText), cT=tokenize(correctText);
+  const ops=lcsOps(uT.map(t=>t.norm),cT.map(t=>t.norm));
+  let corrHTML='',userHTML='';
+  for (const op of ops) {
+    if      (op.type==='equal')  { corrHTML+=`<span class="w-ok">${esc(cT[op.ci].orig)}</span> `; userHTML+=`<span class="w-ok">${esc(uT[op.ui].orig)}</span> `; }
+    else if (op.type==='insert') { corrHTML+=`<span class="w-miss">${esc(cT[op.ci].orig)}</span> `; }
+    else                         { userHTML+=`<span class="w-extra">${esc(uT[op.ui].orig)}</span> `; }
+  }
+  return { corrHTML:corrHTML.trim(), userHTML:userHTML.trim() };
+}
+
+// ── VOICE ──
+
+let recognition=null, isListening=false, micTimer=null, finalTranscript='';
+
+function initSpeech() {
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const r=new SR();
+  r.lang='nb-NO'; r.continuous=true; r.interimResults=true;
+  r.onresult=e=>{
+    for (let i=e.resultIndex;i<e.results.length;i++) {
+      if (e.results[i].isFinal) finalTranscript+=e.results[i][0].transcript+' ';
+    }
+    let interim='';
+    for (let i=e.resultIndex;i<e.results.length;i++) {
+      if (!e.results[i].isFinal) interim+=e.results[i][0].transcript;
+    }
+    document.getElementById('user-input').value=(finalTranscript+interim).trim();
+  };
+  // Some browsers stop on silence even with continuous=true — restart automatically
+  r.onend=()=>{ if (isListening) { try { r.start(); } catch {} } else { updateMicBtn(); setMicStatus(''); } };
+  r.onerror=e=>{ if (e.error==='no-speech'||e.error==='aborted') return; stopMic(); setMicStatus(''); };
+  return r;
+}
+
+function stopMic() {
+  isListening=false;
+  if (micTimer) { clearTimeout(micTimer); micTimer=null; }
+  recognition?.stop();
+  updateMicBtn();
+}
+
+function toggleMic() {
+  if (!recognition) { recognition=initSpeech(); if (!recognition) { setMicStatus('Stemmegjenkjenning støttes ikke i denne nettleseren.'); return; } }
+  if (isListening) {
+    stopMic();
+  } else {
+    finalTranscript='';
+    try {
+      recognition.start();
+      isListening=true;
+      setMicStatus('🔴 Lytter… klikk knappen igjen for å stoppe');
+      // Safety: auto-stop after 5 minutes
+      micTimer=setTimeout(()=>{ stopMic(); setMicStatus('Mikrofon slått av automatisk etter 5 minutter.'); setTimeout(()=>setMicStatus(''),4000); }, 5*60*1000);
+    } catch { isListening=false; }
+  }
+  updateMicBtn();
+}
+function updateMicBtn() {
+  const b=document.getElementById('mic-btn');
+  b.classList.toggle('listening',isListening);
+  b.title=isListening?'Stopp opptak':'Tal inn verset';
+}
+function setMicStatus(msg) { document.getElementById('mic-status').textContent=msg; }
+
+// ── UI ──
+
+function scoreClass(s) { return s>=80?'high':s>=50?'mid':'low'; }
+
+function updateProgress() {
+  const tried=Object.keys(history).length;
+  const avg=tried>0?Math.round(Object.values(history).reduce((s,h)=>s+h.score,0)/tried):0;
+  document.getElementById('progress').textContent=tried===0
+    ?`${verses.length} vers totalt`
+    :`Forsøkt: ${tried} av ${verses.length} · Snitt: ${avg}%`;
+}
+
+function renderHistory(newestRef) {
+  const list=document.getElementById('history-list');
+  const entries=Object.entries(history)
+    .map(([ref,d])=>({ref,...d,adj:getAdjustedScore(d)}))
+    .sort((a,b)=>b.adj-a.adj);
+  if (!entries.length) { list.innerHTML='<div class="history-empty">Ingen vers forsøkt ennå</div>'; return; }
+  list.innerHTML=entries.map(({ref,score,adj,date})=>{
+    const nCls=ref===newestRef?' newest':'';
+    const sRef=ref.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    return `<div class="history-item${nCls}" data-ref="${sRef}">
+      <div class="h-scores">
+        <div class="h-score ${scoreClass(adj)}" title="Tidsjustert score (−1% per dag)">⏱ ${adj}%</div>
+        <div class="h-score-adj ${scoreClass(score)}" title="Opprinnelig score">${score}%</div>
+      </div>
+      <div class="h-info">
+        <div class="h-ref">${ref}</div>
+        <div class="h-date">${date}</div>
+      </div>
+    </div>`;
+  }).join('');
+  if (newestRef) {
+    const el=[...list.querySelectorAll('.history-item')].find(n=>n.dataset.ref===newestRef);
+    if (el) el.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+}
+
+function lock() {
+  ['user-input','submit-btn','reveal-btn','mic-btn'].forEach(id=>document.getElementById(id).disabled=true);
+  if (isListening) stopMic();
+}
+
+function showResult(score,matched,total,revealed) {
+  const banner=document.getElementById('score-banner');
+  banner.className='score-banner '+scoreClass(score);
+  document.getElementById('score-number').textContent=revealed?'Vist':score+'%';
+  document.getElementById('score-msg').textContent=revealed?'Du valgte å se svaret':score===100?'Perfekt!':score>=80?'Veldig bra!':score>=50?'Bra forsøk!':'Øv mer på dette verset';
+  document.getElementById('score-detail').textContent=revealed?'':matched+' av '+total+' ord riktig';
+  if (revealed) {
+    document.getElementById('diff-correct').textContent=currentVerse.text;
+    document.getElementById('diff-user-block').classList.add('hidden');
+    document.querySelector('.diff-legend').classList.add('hidden');
+  } else {
+    const {corrHTML,userHTML}=buildDiff(document.getElementById('user-input').value.trim(),currentVerse.text);
+    document.getElementById('diff-correct').innerHTML=corrHTML;
+    document.getElementById('diff-user').innerHTML=userHTML;
+    document.getElementById('diff-user-block').classList.remove('hidden');
+    document.querySelector('.diff-legend').classList.remove('hidden');
+  }
+  document.getElementById('result-panel').classList.remove('hidden');
+  document.getElementById('result-panel').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function record(score) {
+  history[currentVerse.ref]={ score, date:new Date().toLocaleDateString('no-NO',{day:'2-digit',month:'2-digit',year:'numeric'}), timestamp:Date.now() };
+  saveHistory();
+  renderHistory(currentVerse.ref);
+  updateProgress();
+  cloudSave();
+}
+
+function flyChip(score,revealed,onDone) {
+  const src=document.getElementById('submit-btn').getBoundingClientRect();
+  const dst=document.querySelector('.history-list').getBoundingClientRect();
+  const sx=src.left+src.width/2, sy=src.top+src.height/2;
+  const ex=dst.left+dst.width/2, ey=dst.top+40;
+  const chip=document.createElement('div');
+  chip.className='fly-chip '+(revealed?'shown':scoreClass(score));
+  chip.textContent=revealed?'—':score+'%';
+  chip.style.transform=`translate(${sx}px,${sy}px) translate(-50%,-50%) scale(0)`;
+  document.body.appendChild(chip);
+  const anim=chip.animate([
+    {transform:`translate(${sx}px,${sy}px) translate(-50%,-50%) scale(0)`,   opacity:0},
+    {transform:`translate(${sx}px,${sy}px) translate(-50%,-50%) scale(1.25)`,opacity:1,  offset:.18},
+    {transform:`translate(${sx}px,${sy}px) translate(-50%,-50%) scale(1)`,   opacity:1,  offset:.30},
+    {transform:`translate(${ex}px,${ey}px) translate(-50%,-50%) scale(.7)`,  opacity:.7, offset:.88},
+    {transform:`translate(${ex}px,${ey}px) translate(-50%,-50%) scale(0)`,   opacity:0}
+  ],{duration:820,easing:'cubic-bezier(.4,0,.2,1)',fill:'forwards'});
+  anim.onfinish=()=>{ chip.remove(); onDone(); };
+}
+
+function submitAnswer() {
+  const userText=document.getElementById('user-input').value.trim();
+  if (!userText) { document.getElementById('user-input').focus(); return; }
+  lock();
+  const {score,matched,total}=scoreVerse(userText,currentVerse.text);
+  flyChip(score,false,()=>{ record(score); showResult(score,matched,total,false); });
+}
+
+function revealAnswer() {
+  lock();
+  flyChip(0,true,()=>{ record(0); showResult(0,0,0,true); });
+}
+
+function nextVerse() {
+  currentVerse=selectNextVerse();
+  document.getElementById('reference').textContent=currentVerse.ref;
+  document.getElementById('user-input').value='';
+  ['user-input','submit-btn','reveal-btn','mic-btn'].forEach(id=>document.getElementById(id).disabled=false);
+  document.getElementById('result-panel').classList.add('hidden');
+  document.getElementById('diff-user-block').classList.remove('hidden');
+  document.querySelector('.diff-legend').classList.remove('hidden');
+  updateProgress();
+  document.getElementById('user-input').focus();
+}
+
+// ── KEYBOARD / MODAL ──
+
+document.addEventListener('keydown',e=>{ if(e.ctrlKey&&e.key==='Enter') submitAnswer(); if(e.key==='Escape') closeSettings(); });
+document.getElementById('settings-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeSettings(); });
+
+// ── INIT ──
+
+let currentVerse=null;
+loadHistory();
+
+// Remove any invalid entries (e.g. the {"init":true} JSONBin placeholder)
+let dirty = false;
+for (const [ref, entry] of Object.entries(history)) {
+  if (!entry || typeof entry !== 'object' || typeof entry.score !== 'number') {
+    delete history[ref]; dirty = true;
+  }
+}
+if (dirty) saveHistory();
+
+// Migrate v1 data (no timestamp) to v2
+try {
+  const old=JSON.parse(localStorage.getItem('bibelvers-history-v1')||'{}');
+  for (const [ref,d] of Object.entries(old)) {
+    if (!history[ref]) history[ref]={...d, timestamp:d.timestamp||Date.now()};
+  }
+  if (Object.keys(old).length) saveHistory();
+} catch {}
+
+if (getConfig()) {
+  cloudLoad().then(ok => {
+    renderHistory(null);
+    updateProgress();
+    // After cloud merge, re-select if the current verse is now in history
+    if (ok && currentVerse && history[currentVerse.ref]) {
+      currentVerse = selectNextVerse();
+      document.getElementById('reference').textContent = currentVerse.ref;
+    }
+  });
+} else {
+  setSyncStatus('idle');
+}
+
+currentVerse=selectNextVerse();
+document.getElementById('reference').textContent=currentVerse.ref;
+updateProgress();
+renderHistory(null);
+</script>
+</body>
+</html>
