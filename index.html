@@ -53,6 +53,17 @@
     }
     .ref-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); font-family:system-ui; margin-bottom:6px; }
     .ref-text  { font-size:1.45rem; color:var(--gold-lt); font-style:italic; line-height:1.3; }
+    .prev-score {
+      display:inline-flex; align-items:center; gap:6px;
+      margin-top:10px; font-family:system-ui; font-size:.75rem; color:var(--muted);
+    }
+    .prev-score-badge {
+      display:inline-flex; align-items:center; gap:4px;
+      background:rgba(255,255,255,.06); border:1px solid var(--border);
+      border-radius:20px; padding:2px 9px; font-weight:bold;
+    }
+    .prev-score-badge .orig { color:var(--muted); font-size:.72rem; }
+    .prev-score-badge .adj  { color:var(--gold); }
     .input-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); font-family:system-ui; margin-bottom:5px; }
     textarea {
       width:100%; min-height:110px; background:rgba(255,255,255,.04);
@@ -271,6 +282,13 @@
         <div class="ref-card">
           <div class="ref-label">Bibelreferanse</div>
           <div class="ref-text" id="reference">…</div>
+          <div class="prev-score hidden" id="prev-score">
+            Forrige score:
+            <span class="prev-score-badge">
+              <span class="adj" id="prev-adj"></span>
+              <span class="orig" id="prev-orig"></span>
+            </span>
+          </div>
         </div>
         <div class="input-label">Ditt svar</div>
         <textarea id="user-input" placeholder="Skriv inn verset fra hukommelsen… (Ctrl+Enter for å sjekke)" rows="5"></textarea>
@@ -622,6 +640,16 @@ function setMicStatus(msg) { document.getElementById('mic-status').textContent=m
 
 function scoreClass(s) { return s>=80?'high':s>=50?'mid':'low'; }
 
+function updatePrevScore() {
+  const el  = document.getElementById('prev-score');
+  const entry = history[currentVerse?.ref];
+  if (!entry) { el.classList.add('hidden'); return; }
+  const adj = getAdjustedScore(entry);
+  document.getElementById('prev-adj').textContent  = '⏱ ' + adj + '%';
+  document.getElementById('prev-orig').textContent = '(' + entry.score + '%)';
+  el.classList.remove('hidden');
+}
+
 function updateProgress() {
   const tried=Object.keys(history).length;
   const avg=tried>0?Math.round(Object.values(history).reduce((s,h)=>s+h.score,0)/tried):0;
@@ -726,6 +754,7 @@ function revealAnswer() {
 function nextVerse() {
   currentVerse=selectNextVerse();
   document.getElementById('reference').textContent=currentVerse.ref;
+  updatePrevScore();
   document.getElementById('user-input').value='';
   ['user-input','submit-btn','reveal-btn','mic-btn'].forEach(id=>document.getElementById(id).disabled=false);
   document.getElementById('result-panel').classList.add('hidden');
@@ -772,6 +801,7 @@ if (getConfig()) {
       currentVerse = selectNextVerse();
       document.getElementById('reference').textContent = currentVerse.ref;
     }
+    updatePrevScore();
   });
 } else {
   setSyncStatus('idle');
@@ -779,6 +809,7 @@ if (getConfig()) {
 
 currentVerse=selectNextVerse();
 document.getElementById('reference').textContent=currentVerse.ref;
+updatePrevScore();
 updateProgress();
 renderHistory(null);
 </script>
