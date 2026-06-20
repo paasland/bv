@@ -243,6 +243,24 @@
       font-size:.78rem; font-weight:bold; color:var(--text); font-family:system-ui; margin-bottom:8px;
     }
 
+    /* ── HISTORY REDUCTION ── */
+    .history-item { cursor:pointer; }
+    .h-red { color:var(--gold); }
+
+    /* ── CHART MODAL ── */
+    .modal-chart { max-width:680px; }
+    .chart-legend { display:flex; gap:16px; flex-wrap:wrap; justify-content:center; font-family:system-ui; font-size:.78rem; color:var(--muted); margin-bottom:8px; }
+    .chart-legend i { display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+    .chart-svg { width:100%; height:auto; display:block; }
+    .chart-svg .ax { fill:var(--muted); font-size:10px; font-family:system-ui; }
+    .chart-svg .ax.red { fill:#d98a8a; }
+    .chart-svg .ax-title { fill:var(--muted); font-size:10px; font-family:system-ui; }
+    .chart-svg .ax-title.red { fill:#d98a8a; }
+    .chart-svg circle { cursor:pointer; }
+    .chart-verse { background:rgba(230,184,74,.08); border:1px solid rgba(230,184,74,.25); border-radius:10px; padding:12px 14px; font-style:italic; color:var(--gold-lt); line-height:1.55; margin-bottom:14px; font-size:.95rem; }
+    .chart-meta { text-align:center; font-family:system-ui; font-size:.72rem; color:var(--muted); margin-top:8px; }
+    .chart-empty { text-align:center; color:var(--muted); font-family:system-ui; padding:30px; }
+
     /* ── MISC ── */
     .hidden { display:none !important; }
     @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
@@ -316,6 +334,19 @@
         <button class="btn-modal-test" onclick="closeEditModal()">Avbryt</button>
       </div>
       <div id="edit-status" class="cfg-status"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Chart modal -->
+<div class="modal-overlay hidden" id="chart-modal">
+  <div class="modal modal-chart">
+    <div class="modal-head">
+      <h2 id="chart-title">Utvikling</h2>
+      <button class="modal-close" onclick="closeChartModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="chart-body"></div>
     </div>
   </div>
 </div>
@@ -421,8 +452,15 @@ async function cloudLoad() {
     for (const [ref, entry] of Object.entries(cloud)) {
       if (ref === '__overrides__') continue;
       if (!entry || typeof entry !== 'object' || typeof entry.score !== 'number') continue;
-      if (!history[ref] || (entry.timestamp || 0) > (history[ref].timestamp || 0)) {
+      const local = history[ref];
+      if (!local || (entry.timestamp || 0) > (local.timestamp || 0)) {
+        // Cloud snapshot is newer — take it, but keep any local-only attempts.
+        entry.attempts = mergeAttempts(local?.attempts, ensureAttempts(entry));
         history[ref] = entry; changed = true;
+      } else {
+        // Local snapshot is newer or equal — still fold in any cloud-only attempts.
+        const merged = mergeAttempts(local.attempts, entry.attempts);
+        if (merged.length !== (local.attempts?.length || 0)) { local.attempts = merged; changed = true; }
       }
     }
     // Drop stale refs that don't exist in the current verse list
@@ -542,6 +580,41 @@ function getAdjustedScore(entry) {
   const days = Math.round((todayMidnight - submitted) / 86400000);
   const reduction = entry.reduction ?? 1;
   return Math.max(0, Math.round((entry.score - days * reduction) * 10) / 10);
+}
+
+// ── ATTEMPT SERIES (chart data) ──
+
+function attemptTime(a) {
+  if (!a) return Date.now();
+  if (a.timestamp) return a.timestamp;
+  if (a.date) { const [d, m, y] = a.date.split('.').map(Number); return new Date(y, m - 1, d).getTime(); }
+  return Date.now();
+}
+
+// Returns the attempts array for an entry, creating a single-point series
+// from the latest snapshot when an older entry has no series yet.
+function ensureAttempts(entry) {
+  if (entry && Array.isArray(entry.attempts)) return entry.attempts;
+  if (entry && typeof entry.score === 'number')
+    return [{ score: entry.score, timestamp: entry.timestamp || attemptTime(entry), reduction: entry.reduction ?? 1, date: entry.date }];
+  return [];
+}
+
+// Union two attempt series by (timestamp, score), sorted ascending — used so
+// cloud sync never drops attempts recorded on another device.
+function mergeAttempts(a, b) {
+  const out = [], seen = new Set();
+  for (const arr of [a || [], b || []]) {
+    for (const at of arr) {
+      if (!at || typeof at.score !== 'number') continue;
+      const t = attemptTime(at);
+      const key = t + ':' + at.score;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ...at, timestamp: at.timestamp || t });
+    }
+  }
+  return out.sort((x, y) => attemptTime(x) - attemptTime(y));
 }
 
 // ── VERSES ──
@@ -697,13 +770,20 @@ function buildDiff(userText,correctText) {
 
 // ── VOICE ──
 
-let recognition=null, isListening=false, micTimer=null, finalTranscript='';
+let recognition=null, isListening=false, micTimer=null, finalTranscript='', speechBase='';
+
+// Collapse whitespace and capitalize the first letter (the engine returns
+// lowercase, punctuation-free text; scoring ignores case but this reads nicer).
+function tidySpeech(t) {
+  t = t.replace(/\s+/g,' ').trim();
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
+}
 
 function initSpeech() {
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if (!SR) return null;
   const r=new SR();
-  r.lang='nb-NO'; r.continuous=true; r.interimResults=true;
+  r.lang='nb-NO'; r.continuous=true; r.interimResults=true; r.maxAlternatives=1;
   r.onresult=e=>{
     for (let i=e.resultIndex;i<e.results.length;i++) {
       if (e.results[i].isFinal) finalTranscript+=e.results[i][0].transcript+' ';
@@ -712,11 +792,23 @@ function initSpeech() {
     for (let i=e.resultIndex;i<e.results.length;i++) {
       if (!e.results[i].isFinal) interim+=e.results[i][0].transcript;
     }
-    document.getElementById('user-input').value=(finalTranscript+interim).trim();
+    // Keep any text the user typed before starting the mic, then append speech.
+    document.getElementById('user-input').value=tidySpeech(speechBase+finalTranscript+interim);
   };
   // Some browsers stop on silence even with continuous=true — restart automatically
   r.onend=()=>{ if (isListening) { try { r.start(); } catch {} } else { updateMicBtn(); setMicStatus(''); } };
-  r.onerror=e=>{ if (e.error==='no-speech'||e.error==='aborted') return; stopMic(); setMicStatus(''); };
+  r.onerror=e=>{
+    if (e.error==='no-speech'||e.error==='aborted') return;
+    const msg = {
+      'not-allowed':'Mikrofon-tilgang avslått. Tillat mikrofon i nettleseren og prøv igjen.',
+      'service-not-allowed':'Mikrofon-tilgang avslått. Tillat mikrofon i nettleseren og prøv igjen.',
+      'audio-capture':'Fant ingen mikrofon.',
+      'network':'Nettverksfeil – stemmegjenkjenning krever internett.'
+    }[e.error] || ('Feil ved stemmegjenkjenning: '+e.error);
+    stopMic();
+    setMicStatus(msg);
+    setTimeout(()=>{ if (document.getElementById('mic-status').textContent===msg) setMicStatus(''); }, 6000);
+  };
   return r;
 }
 
@@ -732,7 +824,14 @@ function toggleMic() {
   if (isListening) {
     stopMic();
   } else {
+    if (window.isSecureContext === false) {
+      setMicStatus('Mikrofon krever https eller localhost – åpne siden via en sikker adresse.');
+      return;
+    }
     finalTranscript='';
+    // Preserve whatever is already in the box and continue from there.
+    speechBase = document.getElementById('user-input').value;
+    if (speechBase && !/\s$/.test(speechBase)) speechBase += ' ';
     try {
       recognition.start();
       isListening=true;
@@ -783,14 +882,14 @@ function renderHistory(newestRef) {
     const nCls=ref===newestRef?' newest':'';
     const sRef=ref.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
     const red = reduction ?? 1;
-    return `<div class="history-item${nCls}" data-ref="${sRef}">
+    return `<div class="history-item${nCls}" data-ref="${sRef}" title="Klikk for å se utvikling over tid">
       <div class="h-scores">
         <div class="h-score ${scoreClass(adj)}" title="Tidsjustert score (−${red} per dag)">⏱ ${fmtScore(adj)}</div>
         <div class="h-score-adj ${scoreClass(score)}" title="Opprinnelig score">${score}%</div>
       </div>
       <div class="h-info">
         <div class="h-ref">${ref}</div>
-        <div class="h-date">${date}</div>
+        <div class="h-date">${date} · <span class="h-red" title="Reduksjon per dag">−${red}/dag</span></div>
       </div>
     </div>`;
   }).join('');
@@ -847,11 +946,12 @@ function record(score) {
       newReduction = Math.round((prevReduction + inc) * 10) / 10;
     }
   }
+  const nowTs = Date.now();
+  const dateStr = new Date().toLocaleDateString('no-NO', {day:'2-digit',month:'2-digit',year:'numeric'});
+  const attempts = ensureAttempts(prev);
+  attempts.push({ score, timestamp: nowTs, reduction: newReduction, date: dateStr });
   history[currentVerse.ref] = {
-    score,
-    date: new Date().toLocaleDateString('no-NO', {day:'2-digit',month:'2-digit',year:'numeric'}),
-    timestamp: Date.now(),
-    reduction: newReduction
+    score, date: dateStr, timestamp: nowTs, reduction: newReduction, attempts
   };
   saveHistory();
   renderHistory(currentVerse.ref);
@@ -1033,9 +1133,10 @@ function saveVerseEdits() {
 // ── KEYBOARD / MODAL ──
 
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape') { closeSettings(); closeEditModal(); return; }
+  if(e.key==='Escape') { closeSettings(); closeEditModal(); closeChartModal(); return; }
   const modalOpen = !document.getElementById('settings-modal').classList.contains('hidden')
-                 || !document.getElementById('edit-modal').classList.contains('hidden');
+                 || !document.getElementById('edit-modal').classList.contains('hidden')
+                 || !document.getElementById('chart-modal').classList.contains('hidden');
   if(modalOpen) return;
   if(e.ctrlKey&&e.key==='Enter') {
     // Ctrl+Enter: sjekk svaret når man skriver, gå til neste vers når resultatet vises
@@ -1045,6 +1146,135 @@ document.addEventListener('keydown',e=>{
 });
 document.getElementById('settings-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeSettings(); });
 document.getElementById('edit-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeEditModal(); });
+document.getElementById('chart-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeChartModal(); });
+
+// ── PROGRESS CHART ──
+
+function fmtDateShort(ms) {
+  const d = new Date(ms);
+  return String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0');
+}
+
+// Renders three series over time as inline SVG:
+//   line 1 – time-adjusted score (decays per day, jumps back up at each attempt)
+//   line 2 – raw score at each attempt          (shares the left 0–100 axis)
+//   line 3 – reduction factor per day           (right axis, step function)
+function buildChartSVG(ref) {
+  const entry = history[ref];
+  let attempts = (Array.isArray(entry?.attempts) && entry.attempts.length)
+    ? entry.attempts.slice()
+    : ensureAttempts(entry);
+  attempts = attempts.filter(a => a && typeof a.score === 'number')
+                     .sort((a,b) => attemptTime(a) - attemptTime(b));
+  if (!attempts.length) return '<p class="chart-empty">Ingen data ennå.</p>';
+
+  const DAY = 86400000, now = Date.now();
+  let xMin = attemptTime(attempts[0]);
+  let xMax = Math.max(now, attemptTime(attempts[attempts.length-1]));
+  if (xMax - xMin < DAY/2) xMax = xMin + DAY;          // give a 1-day window for a lone attempt
+
+  let redMax = Math.ceil(Math.max(1, ...attempts.map(a => a.reduction ?? 1)) * 2) / 2;
+  if (redMax < 1) redMax = 1;
+
+  const W=600, H=340, mL=46, mR=54, mT=30, mB=46;
+  const plotW = W-mL-mR, plotH = H-mT-mB;
+  const X  = t => mL + (t - xMin) / (xMax - xMin) * plotW;
+  const Ys = v => mT + (1 - Math.max(0,Math.min(100,v))/100) * plotH;     // score axis (left)
+  const Yr = v => mT + (1 - Math.max(0,Math.min(redMax,v))/redMax) * plotH; // reduction axis (right)
+  const C = { adj:'#e6b84a', raw:'#5ea0e0', red:'#e05252' };
+
+  const adjPts=[], rawPts=[], redPts=[];
+  for (let i=0;i<attempts.length;i++) {
+    const t = attemptTime(attempts[i]);
+    const s = attempts[i].score;
+    const r = attempts[i].reduction ?? 1;
+    const segEnd = i < attempts.length-1 ? attemptTime(attempts[i+1]) : xMax;
+    // time-adjusted: starts at raw score, decays linearly, clamped at 0
+    adjPts.push([t, s]);
+    if (r > 0) {
+      const zeroT = t + (s / r) * DAY;
+      if (zeroT < segEnd) { adjPts.push([zeroT, 0]); adjPts.push([segEnd, 0]); }
+      else adjPts.push([segEnd, s - ((segEnd - t) / DAY) * r]);
+    } else adjPts.push([segEnd, s]);
+    // raw score: one point per attempt
+    rawPts.push([t, s]);
+    // reduction: step held until the next attempt
+    redPts.push([t, r]); redPts.push([segEnd, r]);
+  }
+
+  const poly = (pts, yFn, color, w) =>
+    `<polyline fill="none" stroke="${color}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round" points="${pts.map(p => X(p[0]).toFixed(1)+','+yFn(p[1]).toFixed(1)).join(' ')}"/>`;
+
+  let grid='';
+  [0,25,50,75,100].forEach(v => {
+    const y = Ys(v);
+    grid += `<line x1="${mL}" y1="${y.toFixed(1)}" x2="${mL+plotW}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,.07)"/>`;
+    grid += `<text x="${mL-6}" y="${(y+3).toFixed(1)}" text-anchor="end" class="ax">${v}</text>`;
+  });
+
+  let redAxis='';
+  for (let k=0;k<=4;k++) {
+    const v = redMax*k/4, y = Yr(v);
+    redAxis += `<text x="${mL+plotW+8}" y="${(y+3).toFixed(1)}" text-anchor="start" class="ax red">${v % 1 === 0 ? v : v.toFixed(1)}</text>`;
+  }
+
+  let xAxis='';
+  for (let k=0;k<=4;k++) {
+    const t = xMin + (xMax-xMin)*k/4, x = X(t);
+    xAxis += `<line x1="${x.toFixed(1)}" y1="${mT}" x2="${x.toFixed(1)}" y2="${mT+plotH}" stroke="rgba(255,255,255,.04)"/>`;
+    xAxis += `<text x="${x.toFixed(1)}" y="${mT+plotH+16}" text-anchor="middle" class="ax">${fmtDateShort(t)}</text>`;
+  }
+
+  let marks='';
+  attempts.forEach(a => {
+    const t = attemptTime(a), s = a.score, r = a.reduction ?? 1;
+    const adj = getAdjustedScore({ score:s, timestamp:t, reduction:r });
+    const tip = `${fmtDateShort(t)}: ${s}% (just. ${fmtScore(adj)}), −${r}/dag`;
+    marks += `<circle cx="${X(t).toFixed(1)}" cy="${Ys(s).toFixed(1)}" r="3" fill="${C.raw}"><title>${tip}</title></circle>`;
+    marks += `<circle cx="${X(t).toFixed(1)}" cy="${Yr(r).toFixed(1)}" r="3" fill="${C.red}"><title>${tip}</title></circle>`;
+  });
+  const end = adjPts[adjPts.length-1];   // current time-adjusted value at "now"
+  marks += `<circle cx="${X(end[0]).toFixed(1)}" cy="${Ys(end[1]).toFixed(1)}" r="3.5" fill="none" stroke="${C.adj}" stroke-width="2"><title>Nå: ${fmtScore(Math.max(0,Math.round(end[1]*10)/10))}</title></circle>`;
+
+  const titles =
+    `<text class="ax-title" transform="translate(13,${mT+plotH/2}) rotate(-90)" text-anchor="middle">Score %</text>` +
+    `<text class="ax-title red" transform="translate(${W-13},${mT+plotH/2}) rotate(90)" text-anchor="middle">Reduksjon / dag</text>`;
+
+  return `<div class="chart-legend">
+      <span><i style="background:${C.adj}"></i>Tidsjustert score</span>
+      <span><i style="background:${C.raw}"></i>Score (rå)</span>
+      <span><i style="background:${C.red}"></i>Reduksjon/dag</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+      ${grid}${xAxis}
+      ${poly(redPts, Yr, C.red, 1.5)}
+      ${poly(rawPts, Ys, C.raw, 2)}
+      ${poly(adjPts, Ys, C.adj, 2)}
+      ${redAxis}${titles}${marks}
+    </svg>
+    <div class="chart-meta">${attempts.length} forsøk · hold over et punkt for detaljer</div>`;
+}
+
+function verseTextFor(ref) {
+  const v = verses.find(x => x.ref === ref);
+  return v ? v.text : (verseOverrides[ref] || defaultVerseTexts[ref] || null);
+}
+
+function openChartModal(ref) {
+  const entry = history[ref];
+  if (!entry) return;
+  document.getElementById('chart-title').textContent = ref;
+  const text = verseTextFor(ref);
+  const verseHTML = text ? `<div class="chart-verse">${esc(text)}</div>` : '';
+  document.getElementById('chart-body').innerHTML = verseHTML + buildChartSVG(ref);
+  document.getElementById('chart-modal').classList.remove('hidden');
+}
+function closeChartModal() { document.getElementById('chart-modal').classList.add('hidden'); }
+
+document.getElementById('history-list').addEventListener('click', e => {
+  const item = e.target.closest('.history-item');
+  if (item && item.dataset.ref) openChartModal(item.dataset.ref);
+});
 
 // ── INIT ──
 
@@ -1061,6 +1291,13 @@ let dirty = false;
 for (const [ref, entry] of Object.entries(history)) {
   if (!entry || typeof entry !== 'object' || typeof entry.score !== 'number') {
     delete history[ref]; dirty = true;
+  }
+}
+// Ensure every entry has an attempts series (for the progress chart)
+for (const [ref, entry] of Object.entries(history)) {
+  if (entry && typeof entry === 'object' && typeof entry.score === 'number' && !Array.isArray(entry.attempts)) {
+    entry.attempts = [{ score: entry.score, timestamp: entry.timestamp || attemptTime(entry), reduction: entry.reduction ?? 1, date: entry.date }];
+    dirty = true;
   }
 }
 // Migrate renamed verse ref
