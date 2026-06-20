@@ -935,8 +935,8 @@ function record(score) {
   } else {
     const decrease = prevScore - score;  // positive means worse
     if (decrease <= 0) {
-      // Same or better: increase reduction by 0.1
-      newReduction = Math.round((prevReduction + 0.1) * 10) / 10;
+      // Same or better: decrease reduction by 0.1 (floored at 0.1, never negative)
+      newReduction = Math.max(0.1, Math.round((prevReduction - 0.1) * 10) / 10);
     } else if (decrease <= 5) {
       // 1–5 worse: unchanged
       newReduction = prevReduction;
