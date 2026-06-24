@@ -53,6 +53,15 @@
     }
     .ref-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); font-family:system-ui; margin-bottom:6px; }
     .ref-text  { font-size:1.45rem; color:var(--gold-lt); font-style:italic; line-height:1.3; }
+    .ref-text.is-text { font-size:1.12rem; line-height:1.5; }
+    .mode-badge {
+      display:inline-flex; align-items:center; gap:6px;
+      margin-bottom:12px; padding:5px 14px; border-radius:20px;
+      background:rgba(230,184,74,.12); border:1px solid rgba(230,184,74,.3);
+      color:var(--gold-lt); font-family:system-ui; font-size:.72rem;
+      text-transform:uppercase; letter-spacing:.07em; font-weight:600;
+    }
+    .mode-badge .mode-icon { font-size:.95rem; }
     .prev-score {
       display:inline-flex; align-items:center; gap:6px;
       margin-top:10px; font-family:system-ui; font-size:.75rem; color:var(--muted);
@@ -110,6 +119,7 @@
     .score-banner.high { background:rgba(76,175,110,.15); border:1px solid rgba(76,175,110,.3); }
     .score-banner.mid  { background:rgba(230,184,74,.15); border:1px solid rgba(230,184,74,.3); }
     .score-banner.low  { background:rgba(224,82,82,.15);  border:1px solid rgba(224,82,82,.3); }
+    .score-dir { font-size:.72rem; font-family:system-ui; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:6px; }
     .score-number { font-size:2.5rem; font-weight:bold; font-family:system-ui; line-height:1; }
     .score-banner.high .score-number { color:var(--green); }
     .score-banner.mid  .score-number { color:var(--yellow); }
@@ -140,15 +150,27 @@
       width:290px; min-width:290px; background:var(--bg2);
       border-left:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden;
     }
-    .history-header { padding:13px 15px; border-bottom:1px solid var(--border); font-size:.7rem; text-transform:uppercase; letter-spacing:.1em; color:var(--gold); font-family:system-ui; flex-shrink:0; }
+    .history-header { padding:13px 15px; border-bottom:1px solid var(--border); flex-shrink:0; }
+    .history-header .h-title { font-size:.7rem; text-transform:uppercase; letter-spacing:.1em; color:var(--gold); font-family:system-ui; }
+    .history-legend { margin-top:6px; font-size:.64rem; color:var(--muted); font-family:system-ui; line-height:1.5; }
     .history-list   { flex:1; overflow-y:auto; padding:5px; }
     .history-empty  { padding:18px; color:var(--muted); font-family:system-ui; font-size:.8rem; text-align:center; }
-    .history-item   { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:8px; }
+    .history-item   { display:block; padding:8px 9px; border-radius:8px; }
     .history-item:hover { background:rgba(255,255,255,.04); }
     .history-item.newest { background:rgba(230,184,74,.12); box-shadow:inset 3px 0 0 rgba(230,184,74,.8); }
-    .h-scores { display:flex; flex-direction:column; align-items:center; gap:3px; flex-shrink:0; }
+    .h-top  { margin-bottom:6px; }
+    .h-dirs { display:flex; gap:7px; }
+    .h-dir  {
+      flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+      background:rgba(255,255,255,.03); border:1px solid var(--border);
+      border-radius:7px; padding:6px 4px;
+    }
+    .h-dir.clickable { cursor:pointer; }
+    .h-dir.clickable:hover { background:rgba(230,184,74,.1); border-color:rgba(230,184,74,.3); }
+    .h-dir-icon { font-size:.9rem; line-height:1; }
+    .h-dir-date { font-size:.6rem; color:var(--muted); font-family:system-ui; }
     .h-score {
-      min-width:46px; height:26px; border-radius:5px; padding:0 6px; white-space:nowrap;
+      min-width:46px; height:24px; border-radius:5px; padding:0 6px; white-space:nowrap;
       display:flex; align-items:center; justify-content:center;
       font-size:.73rem; font-weight:bold; font-family:system-ui;
     }
@@ -365,8 +387,9 @@
     <main class="quiz-panel">
       <div class="quiz-inner">
         <div class="quiz-progress" id="progress">Laster…</div>
+        <div style="text-align:center"><span class="mode-badge" id="mode-badge"></span></div>
         <div class="ref-card">
-          <div class="ref-label">Bibelreferanse</div>
+          <div class="ref-label" id="prompt-label">Bibelreferanse</div>
           <div class="ref-text" id="reference">…</div>
           <div class="prev-score hidden" id="prev-score">
             Forrige score:
@@ -376,7 +399,7 @@
             </span>
           </div>
         </div>
-        <div class="input-label">Ditt svar</div>
+        <div class="input-label" id="answer-label">Ditt svar</div>
         <textarea id="user-input" placeholder="Skriv inn verset fra hukommelsen… (Ctrl+Enter for å sjekke / gå videre)" rows="5"></textarea>
         <div class="mic-status" id="mic-status"></div>
         <div class="btn-row">
@@ -388,6 +411,7 @@
 
         <div class="result-panel hidden" id="result-panel">
           <div class="score-banner" id="score-banner">
+            <div class="score-dir"    id="score-dir"></div>
             <div class="score-number" id="score-number"></div>
             <div class="score-msg"    id="score-msg"></div>
             <div class="score-detail" id="score-detail"></div>
@@ -399,7 +423,7 @@
               <span><span class="legend-sw extra"></span>Feil/ekstra</span>
             </div>
             <div class="diff-block">
-              <div class="diff-label">Riktig vers</div>
+              <div class="diff-label" id="correct-label">Riktig vers</div>
               <div class="diff-text" id="diff-correct"></div>
             </div>
             <div class="diff-block" id="diff-user-block">
@@ -413,7 +437,10 @@
     </main>
 
     <aside class="history-panel">
-      <div class="history-header">Historikk</div>
+      <div class="history-header">
+        <div class="h-title">Historikk</div>
+        <div class="history-legend">📖 Husk teksten · 🔖 Husk referansen · ⏱ tidsjustert score</div>
+      </div>
       <div class="history-list" id="history-list">
         <div class="history-empty">Ingen vers forsøkt ennå</div>
       </div>
@@ -450,17 +477,23 @@ async function cloudLoad() {
     const cloud = (await r.json()).record || {};
     let changed = false;
     for (const [ref, entry] of Object.entries(cloud)) {
-      if (ref === '__overrides__') continue;
-      if (!entry || typeof entry !== 'object' || typeof entry.score !== 'number') continue;
-      const local = history[ref];
-      if (!local || (entry.timestamp || 0) > (local.timestamp || 0)) {
-        // Cloud snapshot is newer — take it, but keep any local-only attempts.
-        entry.attempts = mergeAttempts(local?.attempts, ensureAttempts(entry));
-        history[ref] = entry; changed = true;
-      } else {
-        // Local snapshot is newer or equal — still fold in any cloud-only attempts.
-        const merged = mergeAttempts(local.attempts, entry.attempts);
-        if (merged.length !== (local.attempts?.length || 0)) { local.attempts = merged; changed = true; }
+      if (ref.startsWith('__')) continue;
+      const norm = normalizeEntry(entry);
+      if (!norm) continue;
+      for (const dir of DIRS) {
+        const ce = norm[dir];
+        if (!ce) continue;
+        if (!history[ref]) history[ref] = {};
+        const local = history[ref][dir];
+        if (!local || (ce.timestamp || 0) > (local.timestamp || 0)) {
+          // Cloud snapshot is newer — take it, but keep any local-only attempts.
+          ce.attempts = mergeAttempts(local?.attempts, ensureAttempts(ce));
+          history[ref][dir] = ce; changed = true;
+        } else {
+          // Local snapshot is newer or equal — still fold in any cloud-only attempts.
+          const merged = mergeAttempts(local.attempts, ce.attempts);
+          if (merged.length !== (local.attempts?.length || 0)) { local.attempts = merged; changed = true; }
+        }
       }
     }
     // Drop stale refs that don't exist in the current verse list
@@ -697,18 +730,69 @@ function applyAddedVerses() {
   addedVerses.forEach(v => { if (!verses.find(e => e.ref === v.ref)) verses.push({ref:v.ref, text:v.text}); });
 }
 
+// ── DIRECTIONS ──
+// r2t = referanse → tekst (vises referansen, gjenkall teksten — original modus)
+// t2r = tekst → referanse (vises teksten, gjenkall referansen — motsatt modus)
+const DIRS = ['r2t', 't2r'];
+const DIR_META = {
+  r2t: { icon:'📖', badge:'Husk teksten', promptLabel:'Bibelreferanse', answerLabel:'Ditt svar (verset)',
+         placeholder:'Skriv inn verset fra hukommelsen… (Ctrl+Enter for å sjekke / gå videre)',
+         correctLabel:'Riktig vers', dirLabel:'📖 Referanse → tekst', isText:false },
+  t2r: { icon:'🔖', badge:'Husk referansen', promptLabel:'Bibeltekst – hvor står dette?', answerLabel:'Ditt svar (referansen)',
+         placeholder:'Skriv inn bibelreferansen… f.eks. Johannes 3:16 (Ctrl+Enter for å sjekke / gå videre)',
+         correctLabel:'Riktig referanse', dirLabel:'🔖 Tekst → referanse', isText:true }
+};
+
+function adjFor(ref, dir)   { return getAdjustedScore(history[ref]?.[dir]); }
+function verseMinAdj(ref)   { return Math.min(adjFor(ref, 'r2t'), adjFor(ref, 't2r')); }
+
+// For a verse range you only need to recall the start, e.g.
+// "Efeserne 4:11-13" → "Efeserne 4:11". (Book names have no dash.)
+function refAnswer(ref)     { return ref.split(/[-–—]/)[0].trim(); }
+function correctAnswer()    { return currentDir === 'r2t' ? currentVerse.text : refAnswer(currentVerse.ref); }
+
+// The user's answer prepared for comparison — in text→referanse mode the verse
+// range is ignored, so both "Efeserne 4:11" and "Efeserne 4:11-13" are accepted.
+function userAnswer() {
+  const raw = document.getElementById('user-input').value.trim();
+  return currentDir === 't2r' ? refAnswer(raw) : raw;
+}
+
+// Coerce any history entry into the per-direction shape { r2t?, t2r? }.
+// Legacy flat entries ({score,…}) become the r2t direction; junk returns null.
+function normalizeEntry(e) {
+  if (!e || typeof e !== 'object') return null;
+  if (e.r2t || e.t2r) {
+    const out = {};
+    for (const dir of DIRS) if (e[dir] && typeof e[dir].score === 'number') out[dir] = e[dir];
+    return (out.r2t || out.t2r) ? out : null;
+  }
+  if (typeof e.score === 'number') return { r2t: e };
+  return null;
+}
+
 // ── VERSE SELECTION ──
 
 function selectNextVerse() {
-  const untried = verses.filter(v => !history[v.ref] && v.ref !== currentVerse?.ref);
-  if (untried.length > 0) return untried[Math.floor(Math.random() * untried.length)];
-  const scored = verses
-    .filter(v => v.ref !== currentVerse?.ref)
-    .map(v => ({ v, adj: getAdjustedScore(history[v.ref]) }))
-    .sort((a, b) => a.adj - b.adj);
-  // Pick randomly among the 3 lowest-scoring verses
+  let candidates = verses.filter(v => v.ref !== currentVerse?.ref);
+  if (!candidates.length) candidates = verses.slice();
+  const scored = candidates
+    .map(v => {
+      const adjR = adjFor(v.ref, 'r2t'), adjT = adjFor(v.ref, 't2r');
+      // Untested directions default to 0% (handled by getAdjustedScore)
+      return { v, adjR, adjT, minAdj: Math.min(adjR, adjT), r: Math.random() };
+    })
+    // Lowest min-score first; random tie-break so untested (all 0%) verses vary
+    .sort((a, b) => (a.minAdj - b.minAdj) || (a.r - b.r));
+  // Pick one of the three lowest-scoring verses (bottom of the list)
   const pool = scored.slice(0, 3);
-  return pool[Math.floor(Math.random() * pool.length)].v;
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  // Test the weakest direction for that verse (random tie-break)
+  let dir;
+  if      (pick.adjR < pick.adjT) dir = 'r2t';
+  else if (pick.adjT < pick.adjR) dir = 't2r';
+  else                            dir = Math.random() < 0.5 ? 'r2t' : 't2r';
+  return { verse: pick.v, dir };
 }
 
 // ── SCORING ──
@@ -854,9 +938,21 @@ function setMicStatus(msg) { document.getElementById('mic-status').textContent=m
 function scoreClass(s) { return s>=80?'high':s>=50?'mid':'low'; }
 function fmtScore(s) { return (s % 1 === 0 ? s : s.toFixed(1)) + '%'; }
 
+function renderPrompt() {
+  const meta = DIR_META[currentDir];
+  const badge = document.getElementById('mode-badge');
+  badge.innerHTML = `<span class="mode-icon">${meta.icon}</span> ${meta.badge}`;
+  document.getElementById('prompt-label').textContent = meta.promptLabel;
+  const ref = document.getElementById('reference');
+  ref.textContent = currentDir === 'r2t' ? currentVerse.ref : currentVerse.text;
+  ref.classList.toggle('is-text', meta.isText);
+  document.getElementById('answer-label').textContent = meta.answerLabel;
+  document.getElementById('user-input').placeholder = meta.placeholder;
+}
+
 function updatePrevScore() {
-  const el  = document.getElementById('prev-score');
-  const entry = history[currentVerse?.ref];
+  const el = document.getElementById('prev-score');
+  const entry = history[currentVerse?.ref]?.[currentDir];
   if (!entry) { el.classList.add('hidden'); return; }
   const adj = getAdjustedScore(entry);
   document.getElementById('prev-adj').textContent  = '⏱ ' + fmtScore(adj);
@@ -865,37 +961,56 @@ function updatePrevScore() {
 }
 
 function updateProgress() {
-  const tried=Object.keys(history).length;
-  const avg=tried>0?Math.round(Object.values(history).reduce((s,h)=>s+h.score,0)/tried):0;
-  document.getElementById('progress').textContent=tried===0
-    ?`${verses.length} vers totalt`
-    :`Forsøkt: ${tried} av ${verses.length} · Snitt: ${avg}%`;
+  const scores = [];
+  for (const ref of Object.keys(history))
+    for (const dir of DIRS) { const e = history[ref]?.[dir]; if (e) scores.push(e.score); }
+  const total = verses.length * 2;
+  if (!scores.length) {
+    document.getElementById('progress').textContent = `${verses.length} vers · øv begge retninger`;
+    return;
+  }
+  const avg = Math.round(scores.reduce((s, x) => s + x, 0) / scores.length);
+  document.getElementById('progress').textContent = `Forsøkt: ${scores.length} av ${total} · Snitt: ${avg}%`;
+}
+
+function dirCellHTML(ref, dir, sRef) {
+  const meta  = DIR_META[dir];
+  const entry = history[ref]?.[dir];
+  const adj   = getAdjustedScore(entry);
+  const raw   = entry ? entry.score : 0;
+  const red   = entry?.reduction ?? 1;
+  const date  = entry ? entry.date : '–';
+  const clickable = entry ? ' clickable' : '';
+  const tip = entry ? 'Klikk for å se utvikling over tid' : 'Ikke testet ennå (teller som 0 %)';
+  return `<div class="h-dir${clickable}" data-ref="${sRef}" data-dir="${dir}" title="${tip}">
+    <div class="h-dir-icon" title="${meta.dirLabel}">${meta.icon}</div>
+    <div class="h-score ${scoreClass(adj)}" title="Tidsjustert score (−${red} per dag)">⏱ ${fmtScore(adj)}</div>
+    <div class="h-score-adj ${scoreClass(raw)}" title="Siste faktiske score">${raw}%</div>
+    <div class="h-dir-date">${date}</div>
+  </div>`;
 }
 
 function renderHistory(newestRef) {
-  const list=document.getElementById('history-list');
-  const entries=Object.entries(history)
-    .map(([ref,d])=>({ref,...d,adj:getAdjustedScore(d)}))
-    .sort((a,b)=>b.adj-a.adj);
-  if (!entries.length) { list.innerHTML='<div class="history-empty">Ingen vers forsøkt ennå</div>'; return; }
-  list.innerHTML=entries.map(({ref,score,adj,date,reduction})=>{
-    const nCls=ref===newestRef?' newest':'';
-    const sRef=ref.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-    const red = reduction ?? 1;
-    return `<div class="history-item${nCls}" data-ref="${sRef}" title="Klikk for å se utvikling over tid">
-      <div class="h-scores">
-        <div class="h-score ${scoreClass(adj)}" title="Tidsjustert score (−${red} per dag)">⏱ ${fmtScore(adj)}</div>
-        <div class="h-score-adj ${scoreClass(score)}" title="Opprinnelig score">${score}%</div>
-      </div>
-      <div class="h-info">
-        <div class="h-ref">${ref}</div>
-        <div class="h-date">${date} · <span class="h-red" title="Reduksjon per dag">−${red}/dag</span></div>
+  const list = document.getElementById('history-list');
+  const refs = Object.keys(history)
+    .map(ref => ({ ref, minAdj: verseMinAdj(ref) }))
+    // Sort by the lowest time-adjusted score per verse; worst ends up at the bottom
+    .sort((a, b) => b.minAdj - a.minAdj);
+  if (!refs.length) { list.innerHTML = '<div class="history-empty">Ingen vers forsøkt ennå</div>'; return; }
+  list.innerHTML = refs.map(({ ref }) => {
+    const nCls = ref === newestRef ? ' newest' : '';
+    const sRef = ref.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    return `<div class="history-item${nCls}" data-ref="${sRef}">
+      <div class="h-top"><div class="h-ref">${ref}</div></div>
+      <div class="h-dirs">
+        ${dirCellHTML(ref, 'r2t', sRef)}
+        ${dirCellHTML(ref, 't2r', sRef)}
       </div>
     </div>`;
   }).join('');
   if (newestRef) {
-    const el=[...list.querySelectorAll('.history-item')].find(n=>n.dataset.ref===newestRef);
-    if (el) el.scrollIntoView({behavior:'smooth',block:'nearest'});
+    const el = [...list.querySelectorAll('.history-item')].find(n => n.dataset.ref === newestRef);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 
@@ -905,17 +1020,22 @@ function lock() {
 }
 
 function showResult(score,matched,total,revealed) {
+  const meta = DIR_META[currentDir];
+  const correct = correctAnswer();
+  const unit = currentDir === 'r2t' ? 'ord' : 'ord i referansen';
   const banner=document.getElementById('score-banner');
   banner.className='score-banner '+scoreClass(score);
+  document.getElementById('score-dir').textContent=meta.dirLabel;
+  document.getElementById('correct-label').textContent=meta.correctLabel;
   document.getElementById('score-number').textContent=revealed?'Vist':score+'%';
   document.getElementById('score-msg').textContent=revealed?'Du valgte å se svaret':score===100?'Perfekt!':score>=80?'Veldig bra!':score>=50?'Bra forsøk!':'Øv mer på dette verset';
-  document.getElementById('score-detail').textContent=revealed?'':matched+' av '+total+' ord riktig';
+  document.getElementById('score-detail').textContent=revealed?'':matched+' av '+total+' '+unit+' riktig';
   if (revealed) {
-    document.getElementById('diff-correct').textContent=currentVerse.text;
+    document.getElementById('diff-correct').textContent=correct;
     document.getElementById('diff-user-block').classList.add('hidden');
     document.querySelector('.diff-legend').classList.add('hidden');
   } else {
-    const {corrHTML,userHTML}=buildDiff(document.getElementById('user-input').value.trim(),currentVerse.text);
+    const {corrHTML,userHTML}=buildDiff(userAnswer(),correct);
     document.getElementById('diff-correct').innerHTML=corrHTML;
     document.getElementById('diff-user').innerHTML=userHTML;
     document.getElementById('diff-user-block').classList.remove('hidden');
@@ -926,7 +1046,9 @@ function showResult(score,matched,total,revealed) {
 }
 
 function record(score) {
-  const prev = history[currentVerse.ref];
+  const ref = currentVerse.ref, dir = currentDir;
+  if (!history[ref]) history[ref] = {};
+  const prev = history[ref][dir];
   const prevReduction = prev?.reduction ?? 1;
   const prevScore    = prev?.score ?? null;
   let newReduction;
@@ -950,11 +1072,11 @@ function record(score) {
   const dateStr = new Date().toLocaleDateString('no-NO', {day:'2-digit',month:'2-digit',year:'numeric'});
   const attempts = ensureAttempts(prev);
   attempts.push({ score, timestamp: nowTs, reduction: newReduction, date: dateStr });
-  history[currentVerse.ref] = {
+  history[ref][dir] = {
     score, date: dateStr, timestamp: nowTs, reduction: newReduction, attempts
   };
   saveHistory();
-  renderHistory(currentVerse.ref);
+  renderHistory(ref);
   updateProgress();
   cloudSave();
 }
@@ -983,7 +1105,7 @@ function submitAnswer() {
   const userText=document.getElementById('user-input').value.trim();
   if (!userText) { document.getElementById('user-input').focus(); return; }
   lock();
-  const {score,matched,total}=scoreVerse(userText,currentVerse.text);
+  const {score,matched,total}=scoreVerse(userAnswer(),correctAnswer());
   flyChip(score,false,()=>{ record(score); showResult(score,matched,total,false); });
 }
 
@@ -998,8 +1120,9 @@ function skipVerse() {
 }
 
 function nextVerse() {
-  currentVerse=selectNextVerse();
-  document.getElementById('reference').textContent=currentVerse.ref;
+  const sel=selectNextVerse();
+  currentVerse=sel.verse; currentDir=sel.dir;
+  renderPrompt();
   updatePrevScore();
   document.getElementById('user-input').value='';
   ['user-input','submit-btn','reveal-btn','mic-btn'].forEach(id=>document.getElementById(id).disabled=false);
@@ -1078,8 +1201,9 @@ function deleteVerse(btn) {
   saveAddedVerses();
   btn.closest('.edit-verse-item').remove();
   if (currentVerse?.ref === ref) {
-    currentVerse = selectNextVerse();
-    document.getElementById('reference').textContent = currentVerse.ref;
+    const sel = selectNextVerse();
+    currentVerse = sel.verse; currentDir = sel.dir;
+    renderPrompt();
     updatePrevScore();
     document.getElementById('result-panel').classList.add('hidden');
     ['user-input','submit-btn','reveal-btn','mic-btn'].forEach(id => document.getElementById(id).disabled = false);
@@ -1159,8 +1283,8 @@ function fmtDateShort(ms) {
 //   line 1 – time-adjusted score (decays per day, jumps back up at each attempt)
 //   line 2 – raw score at each attempt          (shares the left 0–100 axis)
 //   line 3 – reduction factor per day           (right axis, step function)
-function buildChartSVG(ref) {
-  const entry = history[ref];
+function buildChartSVG(ref, dir) {
+  const entry = history[ref]?.[dir];
   let attempts = (Array.isArray(entry?.attempts) && entry.attempts.length)
     ? entry.attempts.slice()
     : ensureAttempts(entry);
@@ -1260,25 +1384,28 @@ function verseTextFor(ref) {
   return v ? v.text : (verseOverrides[ref] || defaultVerseTexts[ref] || null);
 }
 
-function openChartModal(ref) {
-  const entry = history[ref];
+function openChartModal(ref, dir) {
+  const entry = history[ref]?.[dir];
   if (!entry) return;
-  document.getElementById('chart-title').textContent = ref;
+  document.getElementById('chart-title').textContent = ref + ' · ' + DIR_META[dir].dirLabel;
   const text = verseTextFor(ref);
   const verseHTML = text ? `<div class="chart-verse">${esc(text)}</div>` : '';
-  document.getElementById('chart-body').innerHTML = verseHTML + buildChartSVG(ref);
+  document.getElementById('chart-body').innerHTML = verseHTML + buildChartSVG(ref, dir);
   document.getElementById('chart-modal').classList.remove('hidden');
 }
 function closeChartModal() { document.getElementById('chart-modal').classList.add('hidden'); }
 
 document.getElementById('history-list').addEventListener('click', e => {
-  const item = e.target.closest('.history-item');
-  if (item && item.dataset.ref) openChartModal(item.dataset.ref);
+  const cell = e.target.closest('.h-dir');
+  if (cell && cell.dataset.ref && history[cell.dataset.ref]?.[cell.dataset.dir]) {
+    openChartModal(cell.dataset.ref, cell.dataset.dir);
+  }
 });
 
 // ── INIT ──
 
 let currentVerse=null;
+let currentDir='r2t';
 loadHistory();
 loadVerseOverrides();
 applyVerseOverrides();
@@ -1286,24 +1413,26 @@ loadAddedVerses();
 applyAddedVerses();
 updateEditBtn();
 
-// Remove any invalid entries (e.g. the {"init":true} JSONBin placeholder)
 let dirty = false;
-for (const [ref, entry] of Object.entries(history)) {
-  if (!entry || typeof entry !== 'object' || typeof entry.score !== 'number') {
-    delete history[ref]; dirty = true;
-  }
-}
-// Ensure every entry has an attempts series (for the progress chart)
-for (const [ref, entry] of Object.entries(history)) {
-  if (entry && typeof entry === 'object' && typeof entry.score === 'number' && !Array.isArray(entry.attempts)) {
-    entry.attempts = [{ score: entry.score, timestamp: entry.timestamp || attemptTime(entry), reduction: entry.reduction ?? 1, date: entry.date }];
-    dirty = true;
-  }
-}
-// Migrate renamed verse ref
+// Migrate renamed verse ref (move the whole entry, whatever shape it has)
 if (history['Salomos Ordspråk 4:23'] && !history['Ordspråkene 4:23']) {
   history['Ordspråkene 4:23'] = history['Salomos Ordspråk 4:23'];
   delete history['Salomos Ordspråk 4:23']; dirty = true;
+}
+// Normalize every entry to the per-direction shape { r2t?, t2r? }; legacy flat
+// entries become r2t; junk (e.g. the {"init":true} placeholder) is dropped.
+// Also ensure each direction has an attempts series for the progress chart.
+for (const [ref, entry] of Object.entries(history)) {
+  const wasLegacy = entry && typeof entry === 'object' && typeof entry.score === 'number' && !entry.r2t && !entry.t2r;
+  const norm = normalizeEntry(entry);
+  if (!norm) { delete history[ref]; dirty = true; continue; }
+  for (const dir of DIRS) {
+    if (norm[dir] && !Array.isArray(norm[dir].attempts)) {
+      norm[dir].attempts = ensureAttempts(norm[dir]); dirty = true;
+    }
+  }
+  history[ref] = norm;
+  if (wasLegacy) dirty = true;
 }
 // Remove stale refs that no longer exist in the verse list
 { const validRefs = new Set(verses.map(v => v.ref));
@@ -1313,23 +1442,25 @@ if (history['Salomos Ordspråk 4:23'] && !history['Ordspråkene 4:23']) {
 }
 if (dirty) saveHistory();
 
-// Migrate v1 data (no timestamp) to v2
+// Migrate v1 data (no timestamp) to v2, into the r2t direction
 try {
   const old=JSON.parse(localStorage.getItem('bibelvers-history-v1')||'{}');
+  let v1Changed=false;
   for (const [ref,d] of Object.entries(old)) {
-    if (!history[ref]) history[ref]={...d, timestamp:d.timestamp||Date.now()};
+    if (!history[ref]) { const n=normalizeEntry({...d, timestamp:d.timestamp||Date.now()}); if (n) { history[ref]=n; v1Changed=true; } }
   }
-  if (Object.keys(old).length) saveHistory();
+  if (v1Changed) saveHistory();
 } catch {}
 
 if (getConfig()) {
   cloudLoad().then(ok => {
     renderHistory(null);
     updateProgress();
-    // After cloud merge, re-select if the current verse is now in history
-    if (ok && currentVerse && history[currentVerse.ref]) {
-      currentVerse = selectNextVerse();
-      document.getElementById('reference').textContent = currentVerse.ref;
+    // After cloud merge, re-select if the current verse+direction now has a score
+    if (ok && currentVerse && history[currentVerse.ref]?.[currentDir]) {
+      const sel = selectNextVerse();
+      currentVerse = sel.verse; currentDir = sel.dir;
+      renderPrompt();
     }
     updatePrevScore();
   });
@@ -1337,8 +1468,8 @@ if (getConfig()) {
   setSyncStatus('idle');
 }
 
-currentVerse=selectNextVerse();
-document.getElementById('reference').textContent=currentVerse.ref;
+{ const sel = selectNextVerse(); currentVerse = sel.verse; currentDir = sel.dir; }
+renderPrompt();
 updatePrevScore();
 updateProgress();
 renderHistory(null);
