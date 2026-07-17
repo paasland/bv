@@ -258,12 +258,49 @@
       font-family:system-ui; cursor:pointer; padding:0;
     }
     .btn-delete-verse:hover { text-decoration:underline; }
+    .edit-verse-actions { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
     .add-verse-section {
       border-top:1px solid var(--border); margin-top:16px; padding-top:14px;
     }
     .add-verse-section-title {
       font-size:.78rem; font-weight:bold; color:var(--text); font-family:system-ui; margin-bottom:8px;
     }
+    .removed-verse-section {
+      border-top:1px solid var(--border); margin-top:16px; padding-top:14px;
+    }
+    .removed-verse-item {
+      display:flex; justify-content:space-between; align-items:center; gap:10px; padding:5px 0;
+    }
+    .removed-verse-ref { font-size:.8rem; color:var(--muted); font-family:system-ui; }
+    .btn-restore-verse {
+      background:none; border:none; color:var(--gold); font-size:.72rem;
+      font-family:system-ui; cursor:pointer; padding:0; text-decoration:underline; white-space:nowrap;
+    }
+    .btn-restore-verse:hover { color:var(--gold-lt); }
+    .btn-modal-save:disabled { opacity:.4; cursor:not-allowed; }
+
+    /* ── HISTORY OVERVIEW CHARTS ── */
+    .h-title.clickable { cursor:pointer; }
+    .h-title.clickable:hover { color:var(--gold-lt); }
+    .overview-legend {
+      display:flex; flex-wrap:wrap; gap:5px 12px; margin-bottom:16px;
+      font-family:system-ui; font-size:.66rem; color:var(--muted);
+    }
+    .overview-legend span { display:inline-flex; align-items:center; gap:5px; }
+    .overview-legend i { width:14px; height:3px; border-radius:2px; display:inline-block; flex-shrink:0; }
+    .overview-legend .ov-legend-item { cursor:pointer; user-select:none; padding:1px 3px; border-radius:3px; }
+    .overview-legend .ov-legend-item:hover { background:rgba(255,255,255,.07); color:var(--text); }
+    .overview-legend .ov-legend-item.hidden-series { opacity:.35; text-decoration:line-through; }
+    .overview-controls { display:flex; gap:8px; margin-bottom:12px; }
+    .ov-ctl {
+      background:transparent; border:1px solid var(--border); color:var(--muted);
+      border-radius:6px; padding:3px 10px; font-family:system-ui; font-size:.7rem; cursor:pointer;
+      transition:background .2s,color .2s;
+    }
+    .ov-ctl:hover { background:rgba(255,255,255,.06); color:var(--text); }
+    .overview-chart { margin-bottom:22px; }
+    .overview-chart-title { font-family:system-ui; font-size:.8rem; color:var(--text); font-weight:600; margin-bottom:4px; }
+    .overview-caption { font-family:system-ui; font-size:.68rem; color:var(--muted); margin-bottom:14px; }
 
     /* ── HISTORY REDUCTION ── */
     .history-item { cursor:pointer; }
@@ -351,8 +388,12 @@
           <button class="btn-modal-test" onclick="addNewVerse()">+ Legg til</button>
         </div>
       </div>
+      <div class="removed-verse-section" id="removed-verse-section" style="display:none">
+        <div class="add-verse-section-title">Fjernede standardvers</div>
+        <div id="removed-verse-list"></div>
+      </div>
       <div class="modal-btns" style="margin-top:20px">
-        <button class="btn-modal-save" onclick="saveVerseEdits()">Lagre endringer</button>
+        <button class="btn-modal-save" id="save-edits-btn" onclick="saveVerseEdits()">Lagre endringer</button>
         <button class="btn-modal-test" onclick="closeEditModal()">Avbryt</button>
       </div>
       <div id="edit-status" class="cfg-status"></div>
@@ -438,7 +479,7 @@
 
     <aside class="history-panel">
       <div class="history-header">
-        <div class="h-title">Historikk</div>
+        <div class="h-title clickable" onclick="openOverviewModal()" title="Vis grafer for alle vers">Historikk 📊</div>
         <div class="history-legend">📖 Husk teksten · 🔖 Husk referansen · ⏱ tidsjustert score</div>
       </div>
       <div class="history-list" id="history-list">
@@ -520,8 +561,20 @@ async function cloudLoad() {
           addedVerses.push({ref: av.ref, text: av.text}); addChanged = true;
         }
       }
-      if (addChanged) { saveAddedVerses(); applyAddedVerses(); }
+      if (addChanged) { saveAddedVerses(); }
     }
+    if (Array.isArray(cloud.__removed__)) {
+      let remChanged = false;
+      for (const ref of cloud.__removed__) {
+        if (typeof ref === 'string' && defaultVerseTexts[ref] !== undefined && !removedVerses.includes(ref)) {
+          removedVerses.push(ref);
+          delete history[ref];   // a removed verse keeps no score
+          remChanged = true; changed = true;
+        }
+      }
+      if (remChanged) { saveRemovedVerses(); saveHistory(); }
+    }
+    rebuildVerses();
     setSyncStatus('ok');
     return true;
   } catch { setSyncStatus('offline'); return false; }
@@ -535,6 +588,7 @@ async function cloudSave() {
     const payload = { ...history };
     if (Object.keys(verseOverrides).length > 0) payload.__overrides__ = verseOverrides;
     if (addedVerses.length > 0) payload.__added__ = addedVerses;
+    if (removedVerses.length > 0) payload.__removed__ = removedVerses;
     const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.apiKey },
@@ -702,33 +756,50 @@ const verses = [
   { ref:"1. Johannes 1:5-10", text:"Dette er budskapet vi har hørt av ham og forkynner for dere: Gud er lys, det finnes ikke mørke i ham. Sier vi at vi har fellesskap med ham, men vandrer i mørket, da lyver vi og følger ikke sannheten. Men dersom vi vandrer i lyset, slik han selv er i lyset, da har vi fellesskap med hverandre, og blodet fra Jesus, hans Sønn, renser oss for all synd. Sier vi at vi ikke har synd, da bedrar vi oss selv, og sannheten er ikke i oss. Men dersom vi bekjenner våre synder, er han trofast og rettferdig, så han tilgir oss syndene og renser oss for all urett. Sier vi at vi ikke har syndet, gjør vi ham til en løgner, og hans ord er ikke i oss." }
 ];
 
-// ── VERSE OVERRIDES ──
+// ── VERSE OVERRIDES / ADDED / REMOVED ──
 
-const VERSES_KEY = 'bibelvers-verses-v1';
-let verseOverrides = {};
+const VERSES_KEY  = 'bibelvers-verses-v1';
+const ADDED_KEY   = 'bibelvers-added-v1';
+const REMOVED_KEY = 'bibelvers-removed-v1';
+
+// Canonical built-in list (captured before any user edits) + default texts.
+const builtInVerses = verses.map(v => ({ ref: v.ref, text: v.text }));
 const defaultVerseTexts = {};
-verses.forEach(v => defaultVerseTexts[v.ref] = v.text);
+builtInVerses.forEach(v => defaultVerseTexts[v.ref] = v.text);
+
+let verseOverrides = {};   // ref → custom text (for built-in verses)
+let addedVerses    = [];   // [{ref, text}] user-added verses
+let removedVerses  = [];   // refs of built-in verses the user removed
 
 function loadVerseOverrides() {
   try { verseOverrides = JSON.parse(localStorage.getItem(VERSES_KEY) || '{}'); } catch { verseOverrides = {}; }
 }
 function saveVerseOverrides() { localStorage.setItem(VERSES_KEY, JSON.stringify(verseOverrides)); }
-function applyVerseOverrides() {
-  verses.forEach(v => { v.text = verseOverrides[v.ref] || defaultVerseTexts[v.ref]; });
-}
-
-const ADDED_KEY = 'bibelvers-added-v1';
-let addedVerses = [];
-const builtInCount = verses.length;
 
 function loadAddedVerses() {
   try { addedVerses = JSON.parse(localStorage.getItem(ADDED_KEY) || '[]'); } catch { addedVerses = []; }
 }
 function saveAddedVerses() { localStorage.setItem(ADDED_KEY, JSON.stringify(addedVerses)); }
-function applyAddedVerses() {
-  verses.splice(builtInCount);
-  addedVerses.forEach(v => { if (!verses.find(e => e.ref === v.ref)) verses.push({ref:v.ref, text:v.text}); });
+
+function loadRemovedVerses() {
+  try { removedVerses = JSON.parse(localStorage.getItem(REMOVED_KEY) || '[]'); } catch { removedVerses = []; }
 }
+function saveRemovedVerses() { localStorage.setItem(REMOVED_KEY, JSON.stringify(removedVerses)); }
+
+// Rebuild the active verses list: built-ins (minus removed, with overrides) + added.
+function rebuildVerses() {
+  verses.length = 0;
+  for (const bv of builtInVerses) {
+    if (removedVerses.includes(bv.ref)) continue;
+    verses.push({ ref: bv.ref, text: verseOverrides[bv.ref] || bv.text });
+  }
+  for (const av of addedVerses) {
+    if (!verses.find(e => e.ref === av.ref)) verses.push({ ref: av.ref, text: av.text });
+  }
+}
+// Back-compat wrappers — both just rebuild the full active list.
+function applyVerseOverrides() { rebuildVerses(); }
+function applyAddedVerses()   { rebuildVerses(); }
 
 // ── DIRECTIONS ──
 // r2t = referanse → tekst (vises referansen, gjenkall teksten — original modus)
@@ -1147,7 +1218,10 @@ function verseItemHTML(v) {
     return `<div class="edit-verse-item">
       <div class="edit-verse-ref">${v.ref}</div>
       <textarea class="edit-verse-ta" data-ref="${safeRef}" rows="3">${safeText}</textarea>
-      <button class="btn-reset-verse" onclick="resetVerse(this)" data-ref="${safeRef}"${!isOverridden?' style="visibility:hidden"':''}>↩ Tilbakestill til standard</button>
+      <div class="edit-verse-actions">
+        <button class="btn-reset-verse" onclick="resetVerse(this)" data-ref="${safeRef}"${!isOverridden?' style="visibility:hidden"':''}>↩ Tilbakestill til standard</button>
+        <button class="btn-delete-verse" onclick="deleteVerse(this)" data-ref="${safeRef}">✕ Slett vers</button>
+      </div>
     </div>`;
   } else {
     return `<div class="edit-verse-item">
@@ -1158,11 +1232,31 @@ function verseItemHTML(v) {
   }
 }
 
-function openEditModal() {
+function refreshEditLists() {
   document.getElementById('edit-verse-list').innerHTML = verses.map(verseItemHTML).join('');
+  renderRemovedVerses();
+}
+
+function renderRemovedVerses() {
+  const sec  = document.getElementById('removed-verse-section');
+  const list = document.getElementById('removed-verse-list');
+  if (!removedVerses.length) { sec.style.display = 'none'; list.innerHTML = ''; return; }
+  sec.style.display = '';
+  list.innerHTML = removedVerses.map(ref => {
+    const safeRef = ref.replace(/"/g, '&quot;');
+    return `<div class="removed-verse-item">
+      <span class="removed-verse-ref">${ref}</span>
+      <button class="btn-restore-verse" onclick="restoreVerse(this)" data-ref="${safeRef}">↩ Gjenopprett</button>
+    </div>`;
+  }).join('');
+}
+
+function openEditModal() {
+  refreshEditLists();
   document.getElementById('new-verse-ref').value = '';
   document.getElementById('new-verse-text').value = '';
   document.getElementById('edit-status').textContent = '';
+  document.getElementById('save-edits-btn').disabled = true;   // no text changes yet
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -1172,6 +1266,7 @@ function resetVerse(btn) {
   const ref = btn.dataset.ref;
   btn.closest('.edit-verse-item').querySelector('textarea').value = defaultVerseTexts[ref];
   btn.style.visibility = 'hidden';
+  document.getElementById('save-edits-btn').disabled = false;   // resetting is a change to save
 }
 
 function addNewVerse() {
@@ -1193,13 +1288,26 @@ function addNewVerse() {
 
 function deleteVerse(btn) {
   const ref = btn.dataset.ref;
-  const ai = addedVerses.findIndex(v => v.ref === ref);
-  if (ai < 0) return;
-  addedVerses.splice(ai, 1);
-  const vi = verses.findIndex(v => v.ref === ref);
-  if (vi >= 0) verses.splice(vi, 1);
-  saveAddedVerses();
+  const st  = document.getElementById('edit-status');
+  if (verses.length <= 1) {
+    st.textContent = 'Kan ikke fjerne det siste verset.'; st.className = 'cfg-status error';
+    return;
+  }
+  if (defaultVerseTexts[ref] !== undefined) {
+    // Built-in verse: mark as removed so it stays gone across reloads.
+    if (!removedVerses.includes(ref)) removedVerses.push(ref);
+    saveRemovedVerses();
+    if (verseOverrides[ref]) { delete verseOverrides[ref]; saveVerseOverrides(); }
+  } else {
+    // User-added verse: drop it entirely.
+    const ai = addedVerses.findIndex(v => v.ref === ref);
+    if (ai < 0) return;
+    addedVerses.splice(ai, 1);
+    saveAddedVerses();
+  }
+  rebuildVerses();
   btn.closest('.edit-verse-item').remove();
+  renderRemovedVerses();
   if (currentVerse?.ref === ref) {
     const sel = selectNextVerse();
     currentVerse = sel.verse; currentDir = sel.dir;
@@ -1213,9 +1321,26 @@ function deleteVerse(btn) {
   saveHistory();
   updateProgress();
   renderHistory(null);
-  const st = document.getElementById('edit-status');
   st.textContent = 'Vers slettet.'; st.className = 'cfg-status ok';
   cloudSave().then(() => { setTimeout(() => { if (st.textContent === 'Vers slettet.') st.textContent = ''; }, 2000); });
+}
+
+function restoreVerse(btn) {
+  const ref = btn.dataset.ref;
+  const i = removedVerses.indexOf(ref);
+  if (i < 0) return;
+  removedVerses.splice(i, 1);
+  saveRemovedVerses();
+  rebuildVerses();
+  // Add the restored verse back to the edit list without clobbering other unsaved edits
+  const v = verses.find(x => x.ref === ref);
+  if (v) document.getElementById('edit-verse-list').insertAdjacentHTML('beforeend', verseItemHTML(v));
+  renderRemovedVerses();
+  updateProgress();
+  renderHistory(null);
+  const st = document.getElementById('edit-status');
+  st.textContent = 'Vers gjenopprettet.'; st.className = 'cfg-status ok';
+  cloudSave().then(() => { setTimeout(() => { if (st.textContent === 'Vers gjenopprettet.') st.textContent = ''; }, 2000); });
 }
 
 function saveVerseEdits() {
@@ -1271,6 +1396,10 @@ document.addEventListener('keydown',e=>{
 document.getElementById('settings-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeSettings(); });
 document.getElementById('edit-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeEditModal(); });
 document.getElementById('chart-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeChartModal(); });
+// Enable "Lagre endringer" only once a verse text is actually edited
+document.getElementById('edit-verse-list').addEventListener('input', e => {
+  if (e.target.classList.contains('edit-verse-ta')) document.getElementById('save-edits-btn').disabled = false;
+});
 
 // ── PROGRESS CHART ──
 
@@ -1395,10 +1524,159 @@ function openChartModal(ref, dir) {
 }
 function closeChartModal() { document.getElementById('chart-modal').classList.add('hidden'); }
 
+// ── OVERVIEW CHARTS (alle vers) ──
+
+function verseColor(i, n) { return `hsl(${Math.round(i * 360 / Math.max(1, n))},70%,60%)`; }
+
+// One merged attempt series per verse (both retninger slått sammen), colour-coded.
+function collectVerseSeries() {
+  const out = [];
+  for (const ref of Object.keys(history)) {
+    let atts = [];
+    for (const dir of DIRS) { const e = history[ref]?.[dir]; if (e) atts = atts.concat(ensureAttempts(e)); }
+    atts = atts.filter(a => a && typeof a.score === 'number').sort((a, b) => attemptTime(a) - attemptTime(b));
+    if (atts.length) out.push({ ref, attempts: atts });
+  }
+  out.sort((a, b) => a.ref.localeCompare(b.ref, 'no'));
+  out.forEach((s, i) => s.color = verseColor(i, out.length));
+  return out;
+}
+
+// Pick a "nice" tick step (from the given ladder) giving at most ~6 ticks.
+function niceStep(span, ladder) {
+  for (const st of ladder) if (span / st <= 6) return st;
+  return ladder[ladder.length - 1];
+}
+
+// metric: 'raw' | 'adj' | 'red' — one polyline per verse over a shared time axis.
+// Every chart auto-zooms both axes to the currently visible data.
+function buildOverviewSVG(series, metric, title) {
+  const DAY = 86400000, now = Date.now();
+  let xMin = Infinity, xMax = -Infinity;
+  for (const s of series) for (const a of s.attempts) {
+    const t = attemptTime(a);
+    if (t < xMin) xMin = t; if (t > xMax) xMax = t;
+  }
+  if (!isFinite(xMin)) return '';
+  xMax = Math.max(xMax, now);
+  if (xMax - xMin < DAY/2) xMax = xMin + DAY;
+
+  // Build the plotted points per series (metric-specific) and gather the y-range.
+  const seriesPts = [];
+  let yDataMin = Infinity, yDataMax = -Infinity;
+  for (const s of series) {
+    const att = s.attempts, pts = [];
+    for (let i = 0; i < att.length; i++) {
+      const t = attemptTime(att[i]), sc = att[i].score, r = att[i].reduction ?? 1;
+      const segEnd = i < att.length - 1 ? attemptTime(att[i+1]) : xMax;
+      if (metric === 'raw') { pts.push([t, sc]); }
+      else if (metric === 'red') { pts.push([t, r]); pts.push([segEnd, r]); }
+      else {
+        pts.push([t, sc]);
+        if (r > 0) { const zeroT = t + (sc / r) * DAY; if (zeroT < segEnd) { pts.push([zeroT, 0]); pts.push([segEnd, 0]); } else pts.push([segEnd, sc - ((segEnd - t) / DAY) * r]); }
+        else pts.push([segEnd, sc]);
+      }
+    }
+    for (const p of pts) { if (p[1] < yDataMin) yDataMin = p[1]; if (p[1] > yDataMax) yDataMax = p[1]; }
+    seriesPts.push({ color: s.color, ref: s.ref, pts });
+  }
+  if (!isFinite(yDataMin)) { yDataMin = 0; yDataMax = 1; }
+
+  // Auto-zoom Y to the data range (padded, clamped) for every metric.
+  const isScore = metric !== 'red';
+  const gran = isScore ? 5 : 0.5;                 // round bounds to a clean multiple
+  const pad  = Math.max(isScore ? 2 : 0.2, (yDataMax - yDataMin) * 0.1);
+  let yMin = Math.floor((yDataMin - pad) / gran) * gran;
+  let yMax = Math.ceil((yDataMax + pad) / gran) * gran;
+  if (yMin < 0) yMin = 0;
+  if (isScore && yMax > 100) yMax = 100;
+  if (metric === 'red' && yMax < 1) yMax = 1;
+  if (yMax - yMin < gran) yMax = yMin + gran;
+
+  const W = 600, H = 230, mL = 40, mR = 14, mT = 24, mB = 32;
+  const plotW = W - mL - mR, plotH = H - mT - mB;
+  const span = (yMax - yMin) || 1;
+  const X = t => mL + (t - xMin) / (xMax - xMin) * plotW;
+  const Y = v => mT + (1 - (Math.max(yMin, Math.min(yMax, v)) - yMin) / span) * plotH;
+
+  let grid = '';
+  const step = niceStep(span, isScore ? [5, 10, 25, 50] : [0.5, 1, 2, 5, 10, 20, 50]);
+  for (let v = yMin; v <= yMax + 1e-6; v += step) {
+    const y = Y(v), lbl = Math.round(v * 10) / 10;
+    grid += `<line x1="${mL}" y1="${y.toFixed(1)}" x2="${mL+plotW}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,.07)"/>`;
+    grid += `<text x="${mL-5}" y="${(y+3).toFixed(1)}" text-anchor="end" class="ax">${lbl % 1 === 0 ? lbl : lbl.toFixed(1)}</text>`;
+  }
+  let xAxis = '';
+  for (let k = 0; k <= 3; k++) {
+    const t = xMin + (xMax - xMin) * k / 3, x = X(t);
+    xAxis += `<text x="${x.toFixed(1)}" y="${mT+plotH+15}" text-anchor="middle" class="ax">${fmtDateShort(t)}</text>`;
+  }
+
+  let lines = '';
+  for (const sp of seriesPts) {
+    const pts = sp.pts;
+    if (pts.length === 1) {
+      lines += `<circle cx="${X(pts[0][0]).toFixed(1)}" cy="${Y(pts[0][1]).toFixed(1)}" r="2.6" fill="${sp.color}"><title>${esc(sp.ref)}</title></circle>`;
+    } else {
+      lines += `<polyline fill="none" stroke="${sp.color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" opacity=".9" points="${pts.map(p => X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1)).join(' ')}"><title>${esc(sp.ref)}</title></polyline>`;
+    }
+  }
+  return `<div class="overview-chart"><div class="overview-chart-title">${title}</div>
+    <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">${grid}${xAxis}${lines}</svg></div>`;
+}
+
+let overviewSeries = [];
+const overviewHidden = new Set();   // refs currently toggled off in the overview
+
+function openOverviewModal() {
+  overviewSeries = collectVerseSeries();
+  overviewHidden.clear();           // start with every verse shown
+  document.getElementById('chart-title').textContent = 'Historikk – alle vers';
+  renderOverview();
+  document.getElementById('chart-modal').classList.remove('hidden');
+}
+
+function renderOverview() {
+  const body = document.getElementById('chart-body');
+  if (!overviewSeries.length) { body.innerHTML = '<p class="chart-empty">Ingen data ennå.</p>'; return; }
+  const legend = `<div class="overview-legend">${overviewSeries.map(s =>
+    `<span class="ov-legend-item${overviewHidden.has(s.ref) ? ' hidden-series' : ''}" data-ref="${s.ref.replace(/"/g,'&quot;')}"><i style="background:${s.color}"></i>${esc(s.ref)}</span>`
+  ).join('')}</div>`;
+  const controls = `<div class="overview-controls">
+    <button type="button" class="ov-ctl" data-act="all">Vis alle</button>
+    <button type="button" class="ov-ctl" data-act="none">Skjul alle</button>
+  </div>`;
+  const caption = '<div class="overview-caption">Klikk på et vers for å vise/skjule linjen. Begge retninger (📖/🔖) er slått sammen per vers.</div>';
+  const visible = overviewSeries.filter(s => !overviewHidden.has(s.ref));
+  const charts = visible.length
+    ? buildOverviewSVG(visible, 'raw', 'Score (rå)')
+      + buildOverviewSVG(visible, 'adj', 'Tidsjustert score')
+      + buildOverviewSVG(visible, 'red', 'Reduksjon/dag')
+    : '<p class="chart-empty">Ingen vers valgt.</p>';
+  body.innerHTML = legend + controls + caption + charts;
+}
+
 document.getElementById('history-list').addEventListener('click', e => {
   const cell = e.target.closest('.h-dir');
   if (cell && cell.dataset.ref && history[cell.dataset.ref]?.[cell.dataset.dir]) {
     openChartModal(cell.dataset.ref, cell.dataset.dir);
+  }
+});
+
+// Overview: toggle individual verses (legend) or all at once
+document.getElementById('chart-body').addEventListener('click', e => {
+  const item = e.target.closest('.ov-legend-item');
+  if (item && item.dataset.ref) {
+    const ref = item.dataset.ref;
+    if (overviewHidden.has(ref)) overviewHidden.delete(ref); else overviewHidden.add(ref);
+    renderOverview();
+    return;
+  }
+  const ctl = e.target.closest('.ov-ctl');
+  if (ctl) {
+    if (ctl.dataset.act === 'all') overviewHidden.clear();
+    else overviewSeries.forEach(s => overviewHidden.add(s.ref));
+    renderOverview();
   }
 });
 
@@ -1408,9 +1686,9 @@ let currentVerse=null;
 let currentDir='r2t';
 loadHistory();
 loadVerseOverrides();
-applyVerseOverrides();
 loadAddedVerses();
-applyAddedVerses();
+loadRemovedVerses();
+rebuildVerses();
 updateEditBtn();
 
 let dirty = false;
