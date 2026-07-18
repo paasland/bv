@@ -380,6 +380,11 @@
       <div id="edit-verse-list"></div>
       <div class="add-verse-section">
         <div class="add-verse-section-title">Legg til nytt vers</div>
+        <label>Lim inn fra YouVersion (valgfritt)</label>
+        <textarea id="new-verse-paste" rows="3" placeholder="Lim inn hele verset kopiert fra YouVersion – referanse, tekst og lenke tolkes automatisk."></textarea>
+        <div style="margin:6px 0 2px">
+          <button class="btn-modal-test" onclick="parsePastedVerse(true)">↧ Tolk og fyll inn</button>
+        </div>
         <label>Referanse</label>
         <input type="text" id="new-verse-ref" placeholder="f.eks. Johannes 3:16" autocomplete="off">
         <label>Tekst</label>
@@ -1255,6 +1260,7 @@ function openEditModal() {
   refreshEditLists();
   document.getElementById('new-verse-ref').value = '';
   document.getElementById('new-verse-text').value = '';
+  document.getElementById('new-verse-paste').value = '';
   document.getElementById('edit-status').textContent = '';
   document.getElementById('save-edits-btn').disabled = true;   // no text changes yet
   document.getElementById('edit-modal').classList.remove('hidden');
@@ -1269,6 +1275,46 @@ function resetVerse(btn) {
   document.getElementById('save-edits-btn').disabled = false;   // resetting is a change to save
 }
 
+// Parse a verse copied from the YouVersion app, e.g.
+//   "Matteus 6:33-34 N11BM
+//    [33] Søk først … [34] Så gjør dere …
+//    https://bible.com/…"
+// → { ref: "Matteus 6:33-34", text: "Søk først … Så gjør dere …" }
+function parseYouVersion(raw) {
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l.length);
+  if (!lines.length) return null;
+  // First line = reference. Keep only up to the chapter:verse, which drops anything
+  // that follows it (translation code "N11BM", version name "Bibel2011", "Bibelen 2011", …).
+  const m = lines[0].match(/^(.*?\d+:\d+(?:[-–]\d+(?::\d+)?)?)/);
+  const ref = (m ? m[1] : lines[0]).trim();
+  // Remaining lines = verse text; drop URLs and standalone version lines,
+  // strip [33]-style markers, and collapse whitespace.
+  const isJunk = l =>
+    /^https?:\/\//i.test(l) ||
+    /^[A-ZÆØÅ0-9]{2,10}$/.test(l) ||                 // e.g. "N11BM"
+    (/^bibel(en)?\b/i.test(l) && l.length < 40);      // e.g. "Bibel2011", "Bibelen 2011 bokmål"
+  const text = lines.slice(1)
+    .filter(l => !isJunk(l))
+    .join(' ')
+    .replace(/\[\d+\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!ref || !text) return null;
+  return { ref, text };
+}
+
+function parsePastedVerse(showErrors) {
+  const parsed = parseYouVersion(document.getElementById('new-verse-paste').value);
+  const st = document.getElementById('edit-status');
+  if (!parsed) {
+    if (showErrors) { st.textContent = 'Fant ikke referanse og tekst i innlimingen.'; st.className = 'cfg-status error'; }
+    return;
+  }
+  document.getElementById('new-verse-ref').value  = parsed.ref;
+  document.getElementById('new-verse-text').value = parsed.text;
+  st.textContent = 'Tolket! Sjekk feltene og klikk «+ Legg til».'; st.className = 'cfg-status ok';
+}
+
 function addNewVerse() {
   const ref  = document.getElementById('new-verse-ref').value.trim();
   const text = document.getElementById('new-verse-text').value.trim();
@@ -1281,6 +1327,7 @@ function addNewVerse() {
   document.getElementById('edit-verse-list').insertAdjacentHTML('beforeend', verseItemHTML({ref, text}));
   document.getElementById('new-verse-ref').value = '';
   document.getElementById('new-verse-text').value = '';
+  document.getElementById('new-verse-paste').value = '';
   st.textContent = 'Vers lagt til!'; st.className = 'cfg-status ok';
   updateProgress();
   cloudSave().then(() => { setTimeout(() => { if (st.textContent === 'Vers lagt til!') st.textContent = ''; }, 2000); });
@@ -1400,6 +1447,8 @@ document.getElementById('chart-modal').addEventListener('click',e=>{ if(e.target
 document.getElementById('edit-verse-list').addEventListener('input', e => {
   if (e.target.classList.contains('edit-verse-ta')) document.getElementById('save-edits-btn').disabled = false;
 });
+// Auto-parse a YouVersion paste into the reference/text fields (silent if it doesn't match)
+document.getElementById('new-verse-paste').addEventListener('paste', () => setTimeout(() => parsePastedVerse(false), 0));
 
 // ── PROGRESS CHART ──
 
