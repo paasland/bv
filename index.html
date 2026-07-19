@@ -361,9 +361,21 @@
       <input type="password" id="cfg-api-key" placeholder="$2b$10$..." autocomplete="off">
       <div class="modal-btns">
         <button class="btn-modal-test" onclick="testConnection()">Test tilkobling</button>
-        <button class="btn-modal-save" onclick="saveSettings()">Lagre</button>
       </div>
       <div id="cfg-status" class="cfg-status"></div>
+
+      <h3 style="margin-top:24px">Tale-til-tekst (valgfritt)</h3>
+      <p>Bedre stemmegjenkjenning via OpenAI. <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Lag en API-nøkkel</a> (krever forhåndsbetalt kreditt). Nøkkelen lagres kun i din nettleser og sendes direkte til OpenAI. Uten nøkkel brukes nettleserens innebygde gjenkjenning.</p>
+      <label>OpenAI API-nøkkel</label>
+      <input type="password" id="cfg-openai-key" placeholder="sk-..." autocomplete="off">
+      <div class="modal-btns">
+        <button class="btn-modal-test" onclick="testOpenAI()">Test nøkkel</button>
+      </div>
+      <div id="oai-status" class="cfg-status"></div>
+
+      <div class="modal-btns" style="margin-top:22px">
+        <button class="btn-modal-save" onclick="saveSettings()">Lagre</button>
+      </div>
     </div>
   </div>
 </div>
@@ -609,20 +621,42 @@ function openSettings() {
   const cfg = getConfig();
   document.getElementById('cfg-bin-id').value  = cfg?.binId  || '';
   document.getElementById('cfg-api-key').value = cfg?.apiKey || '';
+  document.getElementById('cfg-openai-key').value = cfg?.openaiKey || '';
   document.getElementById('cfg-status').textContent = '';
   document.getElementById('cfg-status').className = 'cfg-status';
+  document.getElementById('oai-status').textContent = '';
+  document.getElementById('oai-status').className = 'cfg-status';
   document.getElementById('settings-modal').classList.remove('hidden');
 }
 function closeSettings() { document.getElementById('settings-modal').classList.add('hidden'); }
 
 function saveSettings() {
-  const binId  = document.getElementById('cfg-bin-id').value.trim();
-  const apiKey = document.getElementById('cfg-api-key').value.trim();
-  if (!binId || !apiKey) { showCfgStatus('Fyll inn begge feltene.', 'error'); return; }
-  setConfig({ binId, apiKey });
+  const binId     = document.getElementById('cfg-bin-id').value.trim();
+  const apiKey    = document.getElementById('cfg-api-key').value.trim();
+  const openaiKey = document.getElementById('cfg-openai-key').value.trim();
+  if ((binId && !apiKey) || (!binId && apiKey)) {
+    showCfgStatus('Fyll inn både Bin ID og Master Key (eller la begge stå tomme).', 'error'); return;
+  }
+  setConfig({ binId, apiKey, openaiKey });
   closeSettings();
   updateEditBtn();
-  cloudLoad().then(() => { renderHistory(null); updateProgress(); });
+  if (binId && apiKey) cloudLoad().then(() => { renderHistory(null); updateProgress(); });
+}
+
+async function testOpenAI() {
+  const key = document.getElementById('cfg-openai-key').value.trim();
+  if (!key) { showOaiStatus('Fyll inn API-nøkkelen.', 'error'); return; }
+  showOaiStatus('Tester…', 'loading');
+  try {
+    const r = await fetch('https://api.openai.com/v1/models', { headers: { 'Authorization': 'Bearer ' + key } });
+    if      (r.ok)             showOaiStatus('✓ Nøkkel OK!', 'ok');
+    else if (r.status === 401) showOaiStatus('Feil API-nøkkel.', 'error');
+    else                       showOaiStatus(`Feil ${r.status}.`, 'error');
+  } catch { showOaiStatus('Frakoblet – sjekk internett.', 'error'); }
+}
+function showOaiStatus(msg, type) {
+  const el = document.getElementById('oai-status');
+  el.textContent = msg; el.className = 'cfg-status ' + type;
 }
 
 async function testConnection() {
@@ -976,10 +1010,17 @@ function stopMic() {
   isListening=false;
   if (micTimer) { clearTimeout(micTimer); micTimer=null; }
   recognition?.stop();
+  stopCloudRecording(true);   // abort any cloud recording without transcribing
   updateMicBtn();
 }
 
+// Use OpenAI transcription when a key is configured; otherwise the browser engine.
 function toggleMic() {
+  if (getConfig()?.openaiKey) toggleCloudMic();
+  else toggleWebSpeechMic();
+}
+
+function toggleWebSpeechMic() {
   if (!recognition) { recognition=initSpeech(); if (!recognition) { setMicStatus('Stemmegjenkjenning støttes ikke i denne nettleseren.'); return; } }
   if (isListening) {
     stopMic();
@@ -1001,6 +1042,91 @@ function toggleMic() {
     } catch { isListening=false; }
   }
   updateMicBtn();
+}
+
+// ── CLOUD TRANSCRIPTION (OpenAI) ──
+
+let mediaRecorder=null, audioChunks=[], mediaStream=null, cloudAbort=false;
+
+async function toggleCloudMic() {
+  if (isListening) {
+    isListening=false;
+    updateMicBtn();
+    setMicStatus('⏳ Transkriberer…');
+    stopCloudRecording(false);   // stop → onstop transcribes
+    return;
+  }
+  if (window.isSecureContext === false) { setMicStatus('Mikrofon krever https eller localhost.'); return; }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    setMicStatus('Lydopptak støttes ikke i denne nettleseren.'); return;
+  }
+  if (await startCloudRecording()) {
+    isListening=true;
+    updateMicBtn();
+    setMicStatus('🔴 Tar opp… klikk igjen for å transkribere');
+    // Safety: auto-stop + transcribe after 2 minutes (keeps the audio file small)
+    micTimer=setTimeout(()=>{ if (isListening) { isListening=false; updateMicBtn(); setMicStatus('⏳ Transkriberer…'); stopCloudRecording(false); } }, 2*60*1000);
+  }
+}
+
+async function startCloudRecording() {
+  try { mediaStream = await navigator.mediaDevices.getUserMedia({ audio:true }); }
+  catch { setMicStatus('Fikk ikke tilgang til mikrofonen.'); return false; }
+  audioChunks=[]; cloudAbort=false;
+  const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+             : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
+  mediaRecorder = mime ? new MediaRecorder(mediaStream, { mimeType:mime }) : new MediaRecorder(mediaStream);
+  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) audioChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
+    if (micTimer) { clearTimeout(micTimer); micTimer=null; }
+    if (cloudAbort) { setMicStatus(''); return; }
+    const type = (mediaRecorder && mediaRecorder.mimeType) || 'audio/webm';
+    transcribeBlob(new Blob(audioChunks, { type }), type);
+  };
+  mediaRecorder.start();
+  return true;
+}
+
+function stopCloudRecording(abort) {
+  cloudAbort = !!abort;
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  else if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
+}
+
+async function transcribeBlob(blob, type) {
+  const cfg = getConfig();
+  if (!cfg?.openaiKey) { setMicStatus('Ingen OpenAI-nøkkel.'); return; }
+  if (!blob.size)      { setMicStatus(''); return; }
+  const ext = type.includes('mp4') ? 'mp4' : type.includes('mpeg') ? 'mp3'
+            : type.includes('wav') ? 'wav' : type.includes('ogg') ? 'ogg' : 'webm';
+  setMicStatus('⏳ Transkriberer…');
+  // Prefer the newer model; fall back to whisper-1 if the account lacks access to it.
+  const models = ['gpt-4o-mini-transcribe', 'whisper-1'];
+  for (let i = 0; i < models.length; i++) {
+    const fd = new FormData();
+    fd.append('file', blob, 'opptak.' + ext);
+    fd.append('model', models[i]);
+    fd.append('language', 'no');
+    try {
+      const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + cfg.openaiKey }, body: fd
+      });
+      if (r.ok) {
+        const text = ((await r.json()).text || '').trim();
+        if (text) {
+          const ta = document.getElementById('user-input');
+          ta.value = ta.value.trim() ? (ta.value.trim() + ' ' + text) : text;
+        }
+        setMicStatus(''); return;
+      }
+      if (r.status === 401) { setMicStatus('Feil OpenAI-nøkkel.'); setTimeout(()=>setMicStatus(''), 6000); return; }
+      if (i === models.length - 1) { setMicStatus(`Transkribering feilet (${r.status}).`); setTimeout(()=>setMicStatus(''), 6000); }
+      // otherwise: try the next model (e.g. current one not available on this account)
+    } catch {
+      if (i === models.length - 1) { setMicStatus('Frakoblet – transkribering feilet.'); setTimeout(()=>setMicStatus(''), 6000); }
+    }
+  }
 }
 function updateMicBtn() {
   const b=document.getElementById('mic-btn');
@@ -1212,7 +1338,8 @@ function nextVerse() {
 // ── VERSE EDITOR ──
 
 function updateEditBtn() {
-  document.getElementById('edit-btn').classList.toggle('hidden', !getConfig());
+  const cfg = getConfig();
+  document.getElementById('edit-btn').classList.toggle('hidden', !(cfg?.binId && cfg?.apiKey));
 }
 
 function verseItemHTML(v) {
