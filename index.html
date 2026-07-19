@@ -1107,7 +1107,9 @@ async function transcribeBlob(blob, type) {
     const fd = new FormData();
     fd.append('file', blob, 'opptak.' + ext);
     fd.append('model', models[i]);
-    fd.append('language', 'no');
+    fd.append('language', 'no');                                // norsk
+    fd.append('prompt', 'Dette er en tekst på norsk bokmål.');  // styr mot bokmål
+    fd.append('temperature', '0');                              // mer forutsigbart, mindre tilfeldig
     try {
       const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST', headers: { 'Authorization': 'Bearer ' + cfg.openaiKey }, body: fd
