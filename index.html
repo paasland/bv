@@ -298,6 +298,28 @@
       transition:background .2s,color .2s;
     }
     .ov-ctl:hover { background:rgba(255,255,255,.06); color:var(--text); }
+    .overview-legend .ov-legend-item.marked { outline:2px solid var(--gold); background:rgba(230,184,74,.2); color:var(--text); }
+    .ov-line, .ov-hit { cursor:pointer; }
+    .modal-chart.wide { max-width:940px; }
+
+    /* ── OVERVIEW TABLE ── */
+    .overview-table-section { margin-top:26px; border-top:1px solid var(--border); padding-top:16px; }
+    .overview-table-title { font-family:system-ui; font-size:.8rem; color:var(--text); font-weight:600; margin-bottom:8px; }
+    .overview-table-controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:10px; font-family:system-ui; font-size:.72rem; color:var(--muted); }
+    .overview-table-controls label { display:inline-flex; align-items:center; gap:5px; }
+    .overview-table-controls input[type=date] { background:rgba(255,255,255,.05); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:system-ui; font-size:.72rem; padding:3px 6px; }
+    .overview-table-scroll { overflow-x:auto; }
+    .overview-table { border-collapse:collapse; width:100%; font-family:system-ui; font-size:.68rem; }
+    .overview-table th, .overview-table td { padding:4px 7px; text-align:right; white-space:nowrap; border-bottom:1px solid rgba(255,255,255,.06); }
+    .overview-table th.tbl-th { cursor:pointer; user-select:none; color:var(--gold); }
+    .overview-table th.tbl-th:hover { color:var(--gold-lt); }
+    .overview-table .tbl-arrow { color:var(--muted); font-size:.6rem; }
+    .overview-table th:first-child, .overview-table td.tbl-ref { text-align:left; }
+    .overview-table td.tbl-ref { color:var(--text); font-weight:bold; }
+    .overview-table .tbl-filters th { padding:2px 5px; }
+    .overview-table .tbl-filter { width:100%; min-width:52px; background:rgba(255,255,255,.05); border:1px solid var(--border); border-radius:5px; color:var(--text); font-family:system-ui; font-size:.66rem; padding:2px 4px; }
+    .overview-table tbody tr:hover { background:rgba(255,255,255,.03); }
+    .overview-table .tbl-empty { text-align:center; color:var(--muted); padding:14px; }
     .overview-chart { margin-bottom:22px; }
     .overview-chart-title { font-family:system-ui; font-size:.8rem; color:var(--text); font-weight:600; margin-bottom:4px; }
     .overview-caption { font-family:system-ui; font-size:.68rem; color:var(--muted); margin-bottom:14px; }
@@ -1108,7 +1130,9 @@ async function transcribeBlob(blob, type) {
     fd.append('file', blob, 'opptak.' + ext);
     fd.append('model', models[i]);
     fd.append('language', 'no');                                // norsk
-    fd.append('prompt', 'Dette er en tekst på norsk bokmål.');  // styr mot bokmål
+    // Strong bokmål bias: an exemplar full of bokmål-only forms (jeg/ikke/hva/gjøre/kommer,
+    // vs nynorsk eg/ikkje/kva/gjere/kjem) steers spelling to bokmål, not nynorsk.
+    fd.append('prompt', 'Transkriber på norsk bokmål, ikke nynorsk. Eksempel: Jeg vet ikke hva jeg skal gjøre, men jeg tror at vi kommer til å klare det.');
     fd.append('temperature', '0');                              // mer forutsigbart, mindre tilfeldig
     try {
       const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -1694,6 +1718,7 @@ function verseTextFor(ref) {
 function openChartModal(ref, dir) {
   const entry = history[ref]?.[dir];
   if (!entry) return;
+  document.querySelector('#chart-modal .modal')?.classList.remove('wide');
   document.getElementById('chart-title').textContent = ref + ' · ' + DIR_META[dir].dirLabel;
   const text = verseTextFor(ref);
   const verseHTML = text ? `<div class="chart-verse">${esc(text)}</div>` : '';
@@ -1715,7 +1740,7 @@ function collectVerseSeries() {
     atts = atts.filter(a => a && typeof a.score === 'number').sort((a, b) => attemptTime(a) - attemptTime(b));
     if (atts.length) out.push({ ref, attempts: atts });
   }
-  out.sort((a, b) => a.ref.localeCompare(b.ref, 'no'));
+  out.sort((a, b) => a.ref.localeCompare(b.ref, 'no', { numeric: true }));
   out.forEach((s, i) => s.color = verseColor(i, out.length));
   return out;
 }
@@ -1793,10 +1818,17 @@ function buildOverviewSVG(series, metric, title) {
   let lines = '';
   for (const sp of seriesPts) {
     const pts = sp.pts;
+    const safeRef = sp.ref.replace(/"/g, '&quot;');
+    const marked = sp.ref === overviewMarked;
     if (pts.length === 1) {
-      lines += `<circle cx="${X(pts[0][0]).toFixed(1)}" cy="${Y(pts[0][1]).toFixed(1)}" r="2.6" fill="${sp.color}"><title>${esc(sp.ref)}</title></circle>`;
+      const cx = X(pts[0][0]).toFixed(1), cy = Y(pts[0][1]).toFixed(1);
+      lines += `<circle class="ov-hit" data-ref="${safeRef}" cx="${cx}" cy="${cy}" r="9" fill="transparent"/>`;
+      lines += `<circle class="ov-line" data-ref="${safeRef}" cx="${cx}" cy="${cy}" r="${marked?4.5:2.6}" fill="${sp.color}"${marked?' stroke="#fff" stroke-width="1"':''}><title>${esc(sp.ref)}</title></circle>`;
     } else {
-      lines += `<polyline fill="none" stroke="${sp.color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" opacity=".9" points="${pts.map(p => X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1)).join(' ')}"><title>${esc(sp.ref)}</title></polyline>`;
+      const ptsStr = pts.map(p => X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1)).join(' ');
+      // wide transparent line = easier click target; visible line on top
+      lines += `<polyline class="ov-hit" data-ref="${safeRef}" fill="none" stroke="transparent" stroke-width="12" points="${ptsStr}"/>`;
+      lines += `<polyline class="ov-line" data-ref="${safeRef}" fill="none" stroke="${sp.color}" stroke-width="${marked?3.2:1.6}" stroke-linejoin="round" stroke-linecap="round" opacity="${marked?1:(overviewMarked?0.4:0.9)}" points="${ptsStr}"><title>${esc(sp.ref)}</title></polyline>`;
     }
   }
   return `<div class="overview-chart"><div class="overview-chart-title">${title}</div>
@@ -1805,33 +1837,162 @@ function buildOverviewSVG(series, metric, title) {
 
 let overviewSeries = [];
 const overviewHidden = new Set();   // refs currently toggled off in the overview
+let overviewMarked = null;          // ref highlighted from a clicked graph line
+
+// ── OVERVIEW TABLE (kun referanse→tekst) ──
+const TBL_COLS = [
+  { key:'ref',    label:'Vers',         type:'text' },
+  { key:'rawNew', label:'Rå nyeste',    type:'num'  },
+  { key:'rawHi',  label:'Rå høyeste',   type:'num'  },
+  { key:'rawLo',  label:'Rå laveste',   type:'num'  },
+  { key:'adjNew', label:'Just. nyeste', type:'num'  },
+  { key:'adjHi',  label:'Just. høyeste',type:'num'  },
+  { key:'adjLo',  label:'Just. laveste',type:'num'  },
+  { key:'redNew', label:'Red. nyeste',  type:'num'  },
+  { key:'redHi',  label:'Red. høyeste', type:'num'  },
+  { key:'redLo',  label:'Red. laveste', type:'num'  },
+];
+let tblSort = { key:'ref', dir:1 };   // dir: 1 = stigende, -1 = synkende
+let tblFilters = {};                  // key → filteruttrykk
+let tblFrom = null, tblTo = null;     // datointervall (ms)
 
 function openOverviewModal() {
   overviewSeries = collectVerseSeries();
-  overviewHidden.clear();           // start with every verse shown
+  overviewHidden.clear();
+  overviewMarked = null;
+  tblSort = { key:'ref', dir:1 }; tblFilters = {}; tblFrom = null; tblTo = null;
+  document.querySelector('#chart-modal .modal')?.classList.add('wide');
   document.getElementById('chart-title').textContent = 'Historikk – alle vers';
-  renderOverview();
+  const body = document.getElementById('chart-body');
+  if (!overviewSeries.length) {
+    body.innerHTML = '<p class="chart-empty">Ingen data ennå.</p>';
+  } else {
+    body.innerHTML = '<div id="overview-top"></div>' + tableShellHTML();
+    renderOverview();
+    renderOverviewTable();
+  }
   document.getElementById('chart-modal').classList.remove('hidden');
 }
 
 function renderOverview() {
-  const body = document.getElementById('chart-body');
-  if (!overviewSeries.length) { body.innerHTML = '<p class="chart-empty">Ingen data ennå.</p>'; return; }
+  const top = document.getElementById('overview-top');
+  if (!top) return;
   const legend = `<div class="overview-legend">${overviewSeries.map(s =>
-    `<span class="ov-legend-item${overviewHidden.has(s.ref) ? ' hidden-series' : ''}" data-ref="${s.ref.replace(/"/g,'&quot;')}"><i style="background:${s.color}"></i>${esc(s.ref)}</span>`
+    `<span class="ov-legend-item${overviewHidden.has(s.ref) ? ' hidden-series' : ''}${s.ref === overviewMarked ? ' marked' : ''}" data-ref="${s.ref.replace(/"/g,'&quot;')}"><i style="background:${s.color}"></i>${esc(s.ref)}</span>`
   ).join('')}</div>`;
   const controls = `<div class="overview-controls">
     <button type="button" class="ov-ctl" data-act="all">Vis alle</button>
     <button type="button" class="ov-ctl" data-act="none">Skjul alle</button>
   </div>`;
-  const caption = '<div class="overview-caption">Klikk på et vers for å vise/skjule linjen. Begge retninger (📖/🔖) er slått sammen per vers.</div>';
+  const caption = '<div class="overview-caption">Klikk på et vers for å vise/skjule linjen, eller klikk på en graf-linje for å markere verset her. Begge retninger (📖/🔖) er slått sammen per vers.</div>';
   const visible = overviewSeries.filter(s => !overviewHidden.has(s.ref));
   const charts = visible.length
     ? buildOverviewSVG(visible, 'raw', 'Score (rå)')
       + buildOverviewSVG(visible, 'adj', 'Tidsjustert score')
       + buildOverviewSVG(visible, 'red', 'Reduksjon/dag')
     : '<p class="chart-empty">Ingen vers valgt.</p>';
-  body.innerHTML = legend + controls + caption + charts;
+  top.innerHTML = legend + controls + caption + charts;
+  if (overviewMarked) {
+    const el = top.querySelector('.ov-legend-item.marked');
+    if (el) el.scrollIntoView({ block:'nearest', inline:'nearest' });
+  }
+}
+
+function tableShellHTML() {
+  const headers = TBL_COLS.map(c =>
+    `<th class="tbl-th" data-key="${c.key}">${c.label}<span class="tbl-arrow" data-arrow="${c.key}"></span></th>`
+  ).join('');
+  const filters = TBL_COLS.map(c =>
+    `<th><input class="tbl-filter" data-key="${c.key}" placeholder="${c.type==='text'?'søk…':'f.eks. >80'}"></th>`
+  ).join('');
+  return `<div class="overview-table-section">
+    <div class="overview-table-title">Tabell: referanse → tekst</div>
+    <div class="overview-table-controls">
+      <label>Fra <input type="date" id="tbl-from"></label>
+      <label>Til <input type="date" id="tbl-to"></label>
+      <button type="button" class="ov-ctl" id="tbl-reset">Nullstill filtre</button>
+    </div>
+    <div class="overview-table-scroll">
+      <table class="overview-table">
+        <thead><tr class="tbl-head">${headers}</tr><tr class="tbl-filters">${filters}</tr></thead>
+        <tbody id="overview-tbody"></tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+// One row per verse, computed from its referanse→tekst (r2t) attempts in the date range.
+function computeTableRows() {
+  return verses.map(v => {
+    const ref = v.ref;
+    const e = history[ref]?.r2t;
+    let atts = e ? ensureAttempts(e).filter(a => a && typeof a.score === 'number') : [];
+    atts = atts.filter(a => {
+      const t = attemptTime(a);
+      if (tblFrom != null && t < tblFrom) return false;
+      if (tblTo   != null && t > tblTo)   return false;
+      return true;
+    }).sort((a, b) => attemptTime(a) - attemptTime(b));
+    if (!atts.length) return { ref, rawNew:null,rawHi:null,rawLo:null,adjNew:null,adjHi:null,adjLo:null,redNew:null,redHi:null,redLo:null };
+    const newest = atts[atts.length - 1];
+    const raws = atts.map(a => a.score);
+    const adjs = atts.map(a => getAdjustedScore(a));
+    const reds = atts.map(a => a.reduction ?? 1);
+    return {
+      ref,
+      rawNew: newest.score,             rawHi: Math.max(...raws), rawLo: Math.min(...raws),
+      adjNew: getAdjustedScore(newest), adjHi: Math.max(...adjs), adjLo: Math.min(...adjs),
+      redNew: newest.reduction ?? 1,    redHi: Math.max(...reds), redLo: Math.min(...reds),
+    };
+  });
+}
+
+// A numeric filter like ">80", ">=90", "<50", "=100" or a bare number (means ">=").
+function matchNum(v, expr) {
+  const m = String(expr).match(/^\s*(>=|<=|>|<|=)?\s*(-?\d+(?:[.,]\d+)?)\s*$/);
+  if (!m) return true;              // unparseable → ignore this filter
+  if (v == null) return false;      // no data can't satisfy a numeric filter
+  const op = m[1] || '>=', n = parseFloat(m[2].replace(',', '.'));
+  return op === '>' ? v > n : op === '<' ? v < n : op === '<=' ? v <= n : op === '=' ? v === n : v >= n;
+}
+
+function passesFilter(row) {
+  for (const [key, expr] of Object.entries(tblFilters)) {
+    if (!expr) continue;
+    if (key === 'ref') { if (!row.ref.toLowerCase().includes(expr.toLowerCase())) return false; }
+    else if (!matchNum(row[key], expr)) return false;
+  }
+  return true;
+}
+
+function sortRows(rows) {
+  const { key, dir } = tblSort;
+  return rows.slice().sort((a, b) => {
+    if (key === 'ref') return a.ref.localeCompare(b.ref, 'no', { numeric:true }) * dir;
+    const av = a[key], bv = b[key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;        // empty rows always last
+    if (bv == null) return -1;
+    return (av - bv) * dir;
+  });
+}
+
+function renderOverviewTable() {
+  const tbody = document.getElementById('overview-tbody');
+  if (!tbody) return;
+  const rows = sortRows(computeTableRows().filter(passesFilter));
+  const cell = (v, isRed) => v == null ? '–' : (isRed ? (v % 1 === 0 ? v : v.toFixed(1)) : fmtScore(v));
+  tbody.innerHTML = rows.length
+    ? rows.map(r => `<tr>
+        <td class="tbl-ref">${r.ref}</td>
+        <td>${cell(r.rawNew)}</td><td>${cell(r.rawHi)}</td><td>${cell(r.rawLo)}</td>
+        <td>${cell(r.adjNew)}</td><td>${cell(r.adjHi)}</td><td>${cell(r.adjLo)}</td>
+        <td>${cell(r.redNew,true)}</td><td>${cell(r.redHi,true)}</td><td>${cell(r.redLo,true)}</td>
+      </tr>`).join('')
+    : `<tr><td class="tbl-empty" colspan="${TBL_COLS.length}">Ingen rader matcher filteret.</td></tr>`;
+  document.querySelectorAll('#chart-body .tbl-arrow').forEach(el => {
+    el.textContent = el.dataset.arrow === tblSort.key ? (tblSort.dir === 1 ? ' ▲' : ' ▼') : '';
+  });
 }
 
 document.getElementById('history-list').addEventListener('click', e => {
@@ -1841,8 +2002,32 @@ document.getElementById('history-list').addEventListener('click', e => {
   }
 });
 
-// Overview: toggle individual verses (legend) or all at once
+// Overview interactions (delegated on the stable chart-body element)
 document.getElementById('chart-body').addEventListener('click', e => {
+  // Table: sort by a column header
+  const th = e.target.closest('.tbl-th');
+  if (th && th.dataset.key) {
+    if (tblSort.key === th.dataset.key) tblSort.dir *= -1; else tblSort = { key: th.dataset.key, dir: 1 };
+    renderOverviewTable();
+    return;
+  }
+  // Table: reset all filters + date range
+  if (e.target.closest('#tbl-reset')) {
+    tblFilters = {}; tblFrom = null; tblTo = null;
+    const f = document.getElementById('tbl-from'), t = document.getElementById('tbl-to');
+    if (f) f.value = ''; if (t) t.value = '';
+    document.querySelectorAll('#chart-body .tbl-filter').forEach(i => i.value = '');
+    renderOverviewTable();
+    return;
+  }
+  // Chart: click a line → mark/unmark that verse in the legend
+  const line = e.target.closest('.ov-line, .ov-hit');
+  if (line && line.dataset.ref) {
+    overviewMarked = (overviewMarked === line.dataset.ref) ? null : line.dataset.ref;
+    renderOverview();
+    return;
+  }
+  // Legend: toggle one verse's visibility
   const item = e.target.closest('.ov-legend-item');
   if (item && item.dataset.ref) {
     const ref = item.dataset.ref;
@@ -1850,12 +2035,25 @@ document.getElementById('chart-body').addEventListener('click', e => {
     renderOverview();
     return;
   }
+  // Legend: show all / hide all
   const ctl = e.target.closest('.ov-ctl');
-  if (ctl) {
+  if (ctl && ctl.dataset.act) {
     if (ctl.dataset.act === 'all') overviewHidden.clear();
     else overviewSeries.forEach(s => overviewHidden.add(s.ref));
     renderOverview();
   }
+});
+// Table: per-column filter typing
+document.getElementById('chart-body').addEventListener('input', e => {
+  if (e.target.classList.contains('tbl-filter')) {
+    tblFilters[e.target.dataset.key] = e.target.value.trim();
+    renderOverviewTable();
+  }
+});
+// Table: date range
+document.getElementById('chart-body').addEventListener('change', e => {
+  if (e.target.id === 'tbl-from')      { tblFrom = e.target.value ? new Date(e.target.value + 'T00:00:00').getTime() : null; renderOverviewTable(); }
+  else if (e.target.id === 'tbl-to')   { tblTo   = e.target.value ? new Date(e.target.value + 'T23:59:59').getTime() : null; renderOverviewTable(); }
 });
 
 // ── INIT ──
