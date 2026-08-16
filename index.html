@@ -248,11 +248,6 @@
     .edit-verse-item textarea {
       min-height:70px; margin-bottom:4px; font-size:.85rem; line-height:1.6;
     }
-    .btn-reset-verse {
-      background:none; border:none; color:var(--muted); font-size:.72rem;
-      font-family:system-ui; cursor:pointer; padding:0; text-decoration:underline;
-    }
-    .btn-reset-verse:hover { color:var(--text); }
     .btn-delete-verse {
       background:none; border:none; color:var(--red); font-size:.72rem;
       font-family:system-ui; cursor:pointer; padding:0;
@@ -265,19 +260,26 @@
     .add-verse-section-title {
       font-size:.78rem; font-weight:bold; color:var(--text); font-family:system-ui; margin-bottom:8px;
     }
-    .removed-verse-section {
-      border-top:1px solid var(--border); margin-top:16px; padding-top:14px;
-    }
-    .removed-verse-item {
-      display:flex; justify-content:space-between; align-items:center; gap:10px; padding:5px 0;
-    }
-    .removed-verse-ref { font-size:.8rem; color:var(--muted); font-family:system-ui; }
-    .btn-restore-verse {
-      background:none; border:none; color:var(--gold); font-size:.72rem;
-      font-family:system-ui; cursor:pointer; padding:0; text-decoration:underline; white-space:nowrap;
-    }
-    .btn-restore-verse:hover { color:var(--gold-lt); }
     .btn-modal-save:disabled { opacity:.4; cursor:not-allowed; }
+
+    /* ── PROFILE ── */
+    .profile-badge { display:flex; align-items:center; gap:5px; font-family:system-ui; font-size:.78rem; color:var(--muted); padding:0 2px; }
+    .profile-badge b { color:var(--text); }
+    .quiz-empty { max-width:420px; margin:70px auto; text-align:center; font-family:system-ui; color:var(--muted); }
+    .quiz-empty p { margin-bottom:14px; line-height:1.6; }
+
+    /* ── SUGGESTIONS ── */
+    .suggest-section { border-top:1px solid var(--border); margin-top:16px; padding-top:14px; }
+    .suggest-list { max-height:280px; overflow-y:auto; margin-top:10px; }
+    .suggest-item { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
+    .suggest-item:last-child { border-bottom:none; }
+    .suggest-info { min-width:0; }
+    .suggest-ref { font-size:.8rem; font-weight:bold; color:var(--gold); font-family:system-ui; }
+    .suggest-text { font-size:.78rem; color:var(--muted); font-family:Georgia,serif; margin-top:2px; line-height:1.5; }
+    .suggest-tag { display:inline-block; margin-top:4px; font-size:.66rem; font-family:system-ui; color:var(--gold-lt); background:rgba(230,184,74,.12); border:1px solid rgba(230,184,74,.3); border-radius:10px; padding:1px 8px; }
+    .suggest-empty { color:var(--muted); font-family:system-ui; font-size:.8rem; padding:10px 0; }
+    .btn-add-suggest { background:none; border:1px solid rgba(230,184,74,.4); color:var(--gold); border-radius:7px; padding:5px 11px; font-size:.75rem; font-family:system-ui; cursor:pointer; white-space:nowrap; flex-shrink:0; }
+    .btn-add-suggest:hover { background:rgba(230,184,74,.1); }
 
     /* ── HISTORY OVERVIEW CHARTS ── */
     .h-title.clickable { cursor:pointer; }
@@ -361,6 +363,33 @@
 </head>
 <body>
 
+<!-- Profile modal -->
+<div class="modal-overlay hidden" id="profile-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Hvem er du?</h2>
+    </div>
+    <div class="modal-body">
+      <div id="profile-step-name">
+        <p>Skriv inn navnet ditt for å starte eller fortsette din egen profil. Ingen passord trengs.</p>
+        <label>Navn</label>
+        <input type="text" id="profile-name-input" placeholder="f.eks. Per Helge" autocomplete="off">
+        <div class="modal-btns">
+          <button class="btn-modal-save" onclick="submitProfileName()">OK</button>
+        </div>
+        <div id="profile-name-status" class="cfg-status"></div>
+      </div>
+      <div id="profile-step-confirm" class="hidden">
+        <p id="profile-confirm-msg"></p>
+        <div class="modal-btns">
+          <button class="btn-modal-save" onclick="confirmProfile()">Fortsett</button>
+          <button class="btn-modal-test" onclick="backToProfileName()">Velg et annet navn</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Settings modal -->
 <div class="modal-overlay hidden" id="settings-modal">
   <div class="modal">
@@ -412,8 +441,13 @@
     <div class="modal-body">
       <p>Endre teksten på versene som testes. Endringer lagres lokalt og synkroniseres til skyen.</p>
       <div id="edit-verse-list"></div>
+      <div class="suggest-section">
+        <div class="add-verse-section-title">Legg til fra forslag <span style="color:var(--muted);font-weight:normal;font-size:.68rem">(vers andre profiler har lagt inn)</span></div>
+        <input type="text" id="suggest-filter" placeholder="Søk i referanse eller tekst…" autocomplete="off">
+        <div class="suggest-list" id="suggest-list"></div>
+      </div>
       <div class="add-verse-section">
-        <div class="add-verse-section-title">Legg til nytt vers</div>
+        <div class="add-verse-section-title">Legg til nytt vers manuelt</div>
         <label>Lim inn fra YouVersion (valgfritt)</label>
         <textarea id="new-verse-paste" rows="3" placeholder="Lim inn hele verset kopiert fra YouVersion – referanse, tekst og lenke tolkes automatisk."></textarea>
         <div style="margin:6px 0 2px">
@@ -426,10 +460,6 @@
         <div style="margin-top:8px">
           <button class="btn-modal-test" onclick="addNewVerse()">+ Legg til</button>
         </div>
-      </div>
-      <div class="removed-verse-section" id="removed-verse-section" style="display:none">
-        <div class="add-verse-section-title">Fjernede standardvers</div>
-        <div id="removed-verse-list"></div>
       </div>
       <div class="modal-btns" style="margin-top:20px">
         <button class="btn-modal-save" id="save-edits-btn" onclick="saveVerseEdits()">Lagre endringer</button>
@@ -457,15 +487,17 @@
   <header class="app-header">
     <span class="header-title">✝ Bibelvers Quiz</span>
     <div class="header-right">
+      <span class="profile-badge" id="profile-badge"></span>
       <span class="sync-dot idle" id="sync-dot" title="Synkroniseringsstatus"></span>
-      <button class="btn-icon hidden" id="edit-btn" onclick="openEditModal()" title="Rediger vers">✏</button>
+      <button class="btn-icon" id="edit-btn" onclick="openEditModal()" title="Rediger vers">✏</button>
       <button class="btn-icon" onclick="openSettings()" title="Innstillinger">⚙</button>
+      <button class="btn-icon hidden" id="logout-btn" onclick="logoutProfile()" title="Logg ut">⎋</button>
     </div>
   </header>
 
   <div class="app-body">
     <main class="quiz-panel">
-      <div class="quiz-inner">
+      <div class="quiz-inner hidden" id="quiz-inner">
         <div class="quiz-progress" id="progress">Laster…</div>
         <div style="text-align:center"><span class="mode-badge" id="mode-badge"></span></div>
         <div class="ref-card">
@@ -514,6 +546,11 @@
           <button class="btn-next" onclick="nextVerse()">Neste vers →</button>
         </div>
       </div>
+      <div class="quiz-empty hidden" id="quiz-empty">
+        <p>Du har ingen bibelvers ennå.</p>
+        <p>Trykk på ✏-knappen øverst for å legge til vers manuelt, eller velg blant forslag basert på det andre profiler har lagt inn.</p>
+        <button class="btn-modal-save" onclick="openEditModal()">✏ Legg til vers</button>
+      </div>
     </main>
 
     <aside class="history-panel">
@@ -529,9 +566,135 @@
 </div>
 
 <script>
+// ── PROFILES ──
+
+const CURRENT_PROFILE_KEY = 'bibelvers-current-profile-v1';
+const LOCAL_PROFILES_KEY  = 'bibelvers-profiles-v1';
+
+let lastCloudProfiles = null;      // raw {key:{displayName,history,verses}} from the last successful cloud fetch
+let otherProfilesVerses = [];      // [{ref,text,owners:[names]}] — suggestion pool
+let pendingProfileKey = null, pendingProfileName = null;
+
+function normalizeProfileName(raw) { return raw.replace(/\s+/g, ' ').trim(); }
+function profileKeyFor(name) { return normalizeProfileName(name).toLowerCase(); }
+function profileHistoryKey(key) { return 'bibelvers-history-v2:' + key; }
+function profileVersesKey(key)  { return 'bibelvers-myverses-v1:' + key; }
+
+function getCurrentProfileKey() { return localStorage.getItem(CURRENT_PROFILE_KEY) || null; }
+function setCurrentProfile(key, displayName) {
+  localStorage.setItem(CURRENT_PROFILE_KEY, key);
+  const profiles = getLocalProfiles();
+  profiles[key] = displayName;
+  saveLocalProfiles(profiles);
+}
+function logoutProfile() {
+  localStorage.removeItem(CURRENT_PROFILE_KEY);
+  location.reload();
+}
+
+function getLocalProfiles() {
+  try { return JSON.parse(localStorage.getItem(LOCAL_PROFILES_KEY) || '{}'); } catch { return {}; }
+}
+function saveLocalProfiles(p) { localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(p)); }
+
+function renderProfileBadge() {
+  const key = getCurrentProfileKey();
+  const badge = document.getElementById('profile-badge');
+  const logoutBtn = document.getElementById('logout-btn');
+  if (!key) { badge.innerHTML = ''; logoutBtn.classList.add('hidden'); return; }
+  const displayName = getLocalProfiles()[key] || key;
+  badge.innerHTML = `👤 <b>${esc(displayName)}</b>`;
+  logoutBtn.classList.remove('hidden');
+}
+
+function showProfileModal() {
+  document.getElementById('profile-step-name').classList.remove('hidden');
+  document.getElementById('profile-step-confirm').classList.add('hidden');
+  document.getElementById('profile-name-input').value = '';
+  document.getElementById('profile-name-status').textContent = '';
+  document.getElementById('profile-modal').classList.remove('hidden');
+  document.getElementById('profile-name-input').focus();
+}
+
+async function submitProfileName() {
+  const raw = document.getElementById('profile-name-input').value;
+  const name = normalizeProfileName(raw);
+  const st = document.getElementById('profile-name-status');
+  if (!name) { st.textContent = 'Skriv inn et navn.'; st.className = 'cfg-status error'; return; }
+  const key = profileKeyFor(name);
+  st.textContent = 'Sjekker…'; st.className = 'cfg-status loading';
+
+  let isExisting = false, displayName = name, verseCount = 0;
+  const localProfiles = getLocalProfiles();
+  if (localProfiles[key]) {
+    isExisting = true; displayName = localProfiles[key];
+    try { verseCount = JSON.parse(localStorage.getItem(profileVersesKey(key)) || '[]').length; } catch {}
+  }
+  const cfg = getConfig();
+  if (cfg?.binId && cfg?.apiKey) {
+    try {
+      const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, { headers:{'X-Master-Key':cfg.apiKey} });
+      if (r.ok) {
+        const cloud = (await r.json()).record || {};
+        lastCloudProfiles = (cloud.profiles && typeof cloud.profiles === 'object') ? cloud.profiles : null;
+        const cp = lastCloudProfiles?.[key];
+        if (cp) { isExisting = true; displayName = cp.displayName || displayName; verseCount = (cp.verses || []).length; }
+      }
+    } catch {}
+  }
+
+  pendingProfileKey = key; pendingProfileName = displayName;
+  document.getElementById('profile-confirm-msg').textContent = isExisting
+    ? `«${displayName}» er en eksisterende profil (${verseCount} vers). Vil du fortsette som ${displayName}?`
+    : `Det finnes ingen profil som heter «${name}» ennå — dette oppretter en ny, tom profil.`;
+  st.textContent = '';
+  document.getElementById('profile-step-name').classList.add('hidden');
+  document.getElementById('profile-step-confirm').classList.remove('hidden');
+}
+
+function backToProfileName() {
+  document.getElementById('profile-step-confirm').classList.add('hidden');
+  document.getElementById('profile-step-name').classList.remove('hidden');
+  document.getElementById('profile-name-input').focus();
+}
+
+function confirmProfile() {
+  setCurrentProfile(pendingProfileKey, pendingProfileName);
+  location.reload();
+}
+
+// Union of every other profile's verse list — from other profiles known on this browser,
+// enriched with whatever the last cloud fetch saw (if sky-synk is configured).
+function mergeSuggestionOwners(list) {
+  const map = new Map();
+  for (const item of list) {
+    const k = item.ref + '|' + item.text;
+    if (!map.has(k)) map.set(k, { ref:item.ref, text:item.text, owners:new Set() });
+    map.get(k).owners.add(item.owner);
+  }
+  return [...map.values()].map(v => ({ ref:v.ref, text:v.text, owners:[...v.owners] }));
+}
+function refreshOtherProfilesVerses() {
+  const myKey = getCurrentProfileKey();
+  const pool = [];
+  const localProfiles = getLocalProfiles();
+  for (const [key, displayName] of Object.entries(localProfiles)) {
+    if (key === myKey) continue;
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(profileVersesKey(key)) || '[]'); } catch {}
+    for (const v of list) if (v?.ref && v?.text) pool.push({ ref:v.ref, text:v.text, owner:displayName });
+  }
+  if (lastCloudProfiles) {
+    for (const [key, data] of Object.entries(lastCloudProfiles)) {
+      if (key === myKey) continue;
+      for (const v of (data.verses || [])) if (v?.ref && v?.text) pool.push({ ref:v.ref, text:v.text, owner:data.displayName || key });
+    }
+  }
+  otherProfilesVerses = mergeSuggestionOwners(pool);
+}
+
 // ── CONFIG / CLOUD ──
 
-const LOCAL_KEY  = 'bibelvers-history-v2';
 const CONFIG_KEY = 'bibelvers-config-v1';
 
 function getConfig() {
@@ -548,6 +711,8 @@ function setSyncStatus(s) {
 async function cloudLoad() {
   const cfg = getConfig();
   if (!cfg?.binId || !cfg?.apiKey) return false;
+  const myKey = getCurrentProfileKey();
+  if (!myKey) return false;
   setSyncStatus('syncing');
   try {
     const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, {
@@ -555,65 +720,47 @@ async function cloudLoad() {
     });
     if (!r.ok) { setSyncStatus('error'); return false; }
     const cloud = (await r.json()).record || {};
+    lastCloudProfiles = (cloud.profiles && typeof cloud.profiles === 'object') ? cloud.profiles : null;
+    const mine = lastCloudProfiles?.[myKey];
     let changed = false;
-    for (const [ref, entry] of Object.entries(cloud)) {
-      if (ref.startsWith('__')) continue;
-      const norm = normalizeEntry(entry);
-      if (!norm) continue;
-      for (const dir of DIRS) {
-        const ce = norm[dir];
-        if (!ce) continue;
-        if (!history[ref]) history[ref] = {};
-        const local = history[ref][dir];
-        if (!local || (ce.timestamp || 0) > (local.timestamp || 0)) {
-          // Cloud snapshot is newer — take it, but keep any local-only attempts.
-          ce.attempts = mergeAttempts(local?.attempts, ensureAttempts(ce));
-          history[ref][dir] = ce; changed = true;
-        } else {
-          // Local snapshot is newer or equal — still fold in any cloud-only attempts.
-          const merged = mergeAttempts(local.attempts, ce.attempts);
-          if (merged.length !== (local.attempts?.length || 0)) { local.attempts = merged; changed = true; }
+    if (mine) {
+      for (const [ref, entry] of Object.entries(mine.history || {})) {
+        const norm = normalizeEntry(entry);
+        if (!norm) continue;
+        for (const dir of DIRS) {
+          const ce = norm[dir];
+          if (!ce) continue;
+          if (!history[ref]) history[ref] = {};
+          const local = history[ref][dir];
+          if (!local || (ce.timestamp || 0) > (local.timestamp || 0)) {
+            // Cloud snapshot is newer — take it, but keep any local-only attempts.
+            ce.attempts = mergeAttempts(local?.attempts, ensureAttempts(ce));
+            history[ref][dir] = ce; changed = true;
+          } else {
+            // Local snapshot is newer or equal — still fold in any cloud-only attempts.
+            const merged = mergeAttempts(local.attempts, ce.attempts);
+            if (merged.length !== (local.attempts?.length || 0)) { local.attempts = merged; changed = true; }
+          }
         }
       }
+      // Add any verse this profile has in the cloud but not yet locally (never overwrite local text).
+      if (Array.isArray(mine.verses)) {
+        let vChanged = false;
+        for (const v of mine.verses) {
+          if (!v?.ref || !v?.text) continue;
+          if (!myVerses.find(x => x.ref === v.ref)) { myVerses.push({ ref:v.ref, text:v.text }); vChanged = true; }
+        }
+        if (vChanged) { saveMyVerses(); rebuildVerses(); }
+      }
     }
-    // Drop stale refs that don't exist in the current verse list
+    // Drop stale history refs that don't exist in the current verse list
     { const validRefs = new Set(verses.map(v => v.ref));
       for (const ref of Object.keys(history)) {
         if (!validRefs.has(ref)) { delete history[ref]; changed = true; }
       }
     }
     if (changed) saveHistory();
-    if (cloud.__overrides__ && typeof cloud.__overrides__ === 'object') {
-      let ovChanged = false;
-      for (const [ref, text] of Object.entries(cloud.__overrides__)) {
-        if (typeof text === 'string' && verseOverrides[ref] !== text) {
-          verseOverrides[ref] = text; ovChanged = true;
-        }
-      }
-      if (ovChanged) { saveVerseOverrides(); applyVerseOverrides(); }
-    }
-    if (Array.isArray(cloud.__added__)) {
-      let addChanged = false;
-      for (const av of cloud.__added__) {
-        if (!av?.ref || !av?.text) continue;
-        if (!addedVerses.find(v => v.ref === av.ref) && !defaultVerseTexts[av.ref]) {
-          addedVerses.push({ref: av.ref, text: av.text}); addChanged = true;
-        }
-      }
-      if (addChanged) { saveAddedVerses(); }
-    }
-    if (Array.isArray(cloud.__removed__)) {
-      let remChanged = false;
-      for (const ref of cloud.__removed__) {
-        if (typeof ref === 'string' && defaultVerseTexts[ref] !== undefined && !removedVerses.includes(ref)) {
-          removedVerses.push(ref);
-          delete history[ref];   // a removed verse keeps no score
-          remChanged = true; changed = true;
-        }
-      }
-      if (remChanged) { saveRemovedVerses(); saveHistory(); }
-    }
-    rebuildVerses();
+    refreshOtherProfilesVerses();
     setSyncStatus('ok');
     return true;
   } catch { setSyncStatus('offline'); return false; }
@@ -622,18 +769,27 @@ async function cloudLoad() {
 async function cloudSave() {
   const cfg = getConfig();
   if (!cfg?.binId || !cfg?.apiKey) return;
+  const myKey = getCurrentProfileKey();
+  if (!myKey) return;
   setSyncStatus('syncing');
   try {
-    const payload = { ...history };
-    if (Object.keys(verseOverrides).length > 0) payload.__overrides__ = verseOverrides;
-    if (addedVerses.length > 0) payload.__added__ = addedVerses;
-    if (removedVerses.length > 0) payload.__removed__ = removedVerses;
-    const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}`, {
+    // Read-modify-write the whole bin so a save from one profile never clobbers another's data.
+    let full = {};
+    try {
+      const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, { headers: { 'X-Master-Key': cfg.apiKey } });
+      if (r.ok) full = (await r.json()).record || {};
+    } catch {}
+    if (!full.profiles || typeof full.profiles !== 'object') full.profiles = {};
+    const displayName = getLocalProfiles()[myKey] || myKey;
+    full.profiles[myKey] = { displayName, history, verses: myVerses };
+    lastCloudProfiles = full.profiles;
+    const r2 = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.apiKey },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(full)
     });
-    setSyncStatus(r.ok ? 'ok' : 'error');
+    setSyncStatus(r2.ok ? 'ok' : 'error');
+    refreshOtherProfilesVerses();
   } catch { setSyncStatus('offline'); }
 }
 
@@ -661,8 +817,7 @@ function saveSettings() {
   }
   setConfig({ binId, apiKey, openaiKey });
   closeSettings();
-  updateEditBtn();
-  if (binId && apiKey) cloudLoad().then(() => { renderHistory(null); updateProgress(); });
+  if (binId && apiKey) cloudLoad().then(() => { renderHistory(null); updateProgress(); renderSuggestions(); });
 }
 
 async function testOpenAI() {
@@ -705,9 +860,10 @@ function showCfgStatus(msg, type) {
 let history = {};
 
 function loadHistory() {
-  try { history = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}'); } catch { history = {}; }
+  const key = profileHistoryKey(getCurrentProfileKey());
+  try { history = JSON.parse(localStorage.getItem(key) || '{}'); } catch { history = {}; }
 }
-function saveHistory() { localStorage.setItem(LOCAL_KEY, JSON.stringify(history)); }
+function saveHistory() { localStorage.setItem(profileHistoryKey(getCurrentProfileKey()), JSON.stringify(history)); }
 
 // ── TIME-ADJUSTED SCORE ──
 
@@ -767,7 +923,9 @@ function mergeAttempts(a, b) {
 
 // ── VERSES ──
 
-const verses = [
+// Migration-only seed data: used to build "per helge"'s initial flat verse list the first
+// time this browser runs the profile-aware version of the app. Not used by the live quiz flow.
+const DEFAULT_VERSES = [
   { ref:"1. Mosebok 1:1", text:"I begynnelsen skapte Gud himmelen og jorden." },
   { ref:"4. Mosebok 6:24-26", text:"Herren velsigne deg og bevare deg! Herren la sitt ansikt lyse over deg og være deg nådig! Herren løfte sitt ansikt mot deg og gi deg fred!" },
   { ref:"5. Mosebok 33:25", text:"Som dine dager er, skal din styrke være." },
@@ -817,50 +975,43 @@ const verses = [
   { ref:"1. Johannes 1:5-10", text:"Dette er budskapet vi har hørt av ham og forkynner for dere: Gud er lys, det finnes ikke mørke i ham. Sier vi at vi har fellesskap med ham, men vandrer i mørket, da lyver vi og følger ikke sannheten. Men dersom vi vandrer i lyset, slik han selv er i lyset, da har vi fellesskap med hverandre, og blodet fra Jesus, hans Sønn, renser oss for all synd. Sier vi at vi ikke har synd, da bedrar vi oss selv, og sannheten er ikke i oss. Men dersom vi bekjenner våre synder, er han trofast og rettferdig, så han tilgir oss syndene og renser oss for all urett. Sier vi at vi ikke har syndet, gjør vi ham til en løgner, og hans ord er ikke i oss." }
 ];
 
-// ── VERSE OVERRIDES / ADDED / REMOVED ──
+// ── MY VERSES (per profile, flat list) ──
 
-const VERSES_KEY  = 'bibelvers-verses-v1';
-const ADDED_KEY   = 'bibelvers-added-v1';
-const REMOVED_KEY = 'bibelvers-removed-v1';
+let verses    = [];   // the active quiz list, rebuilt from myVerses
+let myVerses  = [];   // [{ref, text}] — this profile's own verses (no built-ins for new profiles)
 
-// Canonical built-in list (captured before any user edits) + default texts.
-const builtInVerses = verses.map(v => ({ ref: v.ref, text: v.text }));
-const defaultVerseTexts = {};
-builtInVerses.forEach(v => defaultVerseTexts[v.ref] = v.text);
-
-let verseOverrides = {};   // ref → custom text (for built-in verses)
-let addedVerses    = [];   // [{ref, text}] user-added verses
-let removedVerses  = [];   // refs of built-in verses the user removed
-
-function loadVerseOverrides() {
-  try { verseOverrides = JSON.parse(localStorage.getItem(VERSES_KEY) || '{}'); } catch { verseOverrides = {}; }
+function loadMyVerses() {
+  try { myVerses = JSON.parse(localStorage.getItem(profileVersesKey(getCurrentProfileKey())) || '[]'); } catch { myVerses = []; }
 }
-function saveVerseOverrides() { localStorage.setItem(VERSES_KEY, JSON.stringify(verseOverrides)); }
+function saveMyVerses() { localStorage.setItem(profileVersesKey(getCurrentProfileKey()), JSON.stringify(myVerses)); }
 
-function loadAddedVerses() {
-  try { addedVerses = JSON.parse(localStorage.getItem(ADDED_KEY) || '[]'); } catch { addedVerses = []; }
-}
-function saveAddedVerses() { localStorage.setItem(ADDED_KEY, JSON.stringify(addedVerses)); }
-
-function loadRemovedVerses() {
-  try { removedVerses = JSON.parse(localStorage.getItem(REMOVED_KEY) || '[]'); } catch { removedVerses = []; }
-}
-function saveRemovedVerses() { localStorage.setItem(REMOVED_KEY, JSON.stringify(removedVerses)); }
-
-// Rebuild the active verses list: built-ins (minus removed, with overrides) + added.
 function rebuildVerses() {
   verses.length = 0;
-  for (const bv of builtInVerses) {
-    if (removedVerses.includes(bv.ref)) continue;
-    verses.push({ ref: bv.ref, text: verseOverrides[bv.ref] || bv.text });
-  }
-  for (const av of addedVerses) {
-    if (!verses.find(e => e.ref === av.ref)) verses.push({ ref: av.ref, text: av.text });
-  }
+  for (const v of myVerses) verses.push({ ref: v.ref, text: v.text });
 }
-// Back-compat wrappers — both just rebuild the full active list.
-function applyVerseOverrides() { rebuildVerses(); }
-function applyAddedVerses()   { rebuildVerses(); }
+
+// Adds a verse to this profile's list (manual entry or "legg til fra forslag") and keeps the
+// quiz UI in sync if the list was previously empty.
+function addVerseToMyList(ref, text) {
+  const wasEmpty = verses.length === 0;
+  myVerses.push({ ref, text });
+  saveMyVerses();
+  rebuildVerses();
+  if (wasEmpty) {
+    const sel = selectNextVerse();
+    currentVerse = sel.verse; currentDir = sel.dir;
+    renderPrompt();
+    updatePrevScore();
+    ['user-input','submit-btn','reveal-btn','mic-btn'].forEach(id => document.getElementById(id).disabled = false);
+  }
+  refreshQuizVisibility();
+}
+
+function refreshQuizVisibility() {
+  const empty = verses.length === 0;
+  document.getElementById('quiz-inner').classList.toggle('hidden', empty);
+  document.getElementById('quiz-empty').classList.toggle('hidden', !empty);
+}
 
 // ── DIRECTIONS ──
 // r2t = referanse → tekst (vises referansen, gjenkall teksten — original modus)
@@ -1363,48 +1514,47 @@ function nextVerse() {
 
 // ── VERSE EDITOR ──
 
-function updateEditBtn() {
-  const cfg = getConfig();
-  document.getElementById('edit-btn').classList.toggle('hidden', !(cfg?.binId && cfg?.apiKey));
-}
-
 function verseItemHTML(v) {
   const safeRef = v.ref.replace(/"/g, '&quot;');
   const safeText = v.text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  if (defaultVerseTexts[v.ref] !== undefined) {
-    const isOverridden = !!verseOverrides[v.ref];
-    return `<div class="edit-verse-item">
-      <div class="edit-verse-ref">${v.ref}</div>
-      <textarea class="edit-verse-ta" data-ref="${safeRef}" rows="3">${safeText}</textarea>
-      <div class="edit-verse-actions">
-        <button class="btn-reset-verse" onclick="resetVerse(this)" data-ref="${safeRef}"${!isOverridden?' style="visibility:hidden"':''}>↩ Tilbakestill til standard</button>
-        <button class="btn-delete-verse" onclick="deleteVerse(this)" data-ref="${safeRef}">✕ Slett vers</button>
-      </div>
-    </div>`;
-  } else {
-    return `<div class="edit-verse-item">
-      <div class="edit-verse-ref">${v.ref} <span style="color:var(--muted);font-weight:normal;font-size:.68rem">(egendefinert)</span></div>
-      <textarea class="edit-verse-ta" data-ref="${safeRef}" rows="3">${safeText}</textarea>
+  return `<div class="edit-verse-item">
+    <div class="edit-verse-ref">${v.ref}</div>
+    <textarea class="edit-verse-ta" data-ref="${safeRef}" rows="3">${safeText}</textarea>
+    <div class="edit-verse-actions">
       <button class="btn-delete-verse" onclick="deleteVerse(this)" data-ref="${safeRef}">✕ Slett vers</button>
-    </div>`;
-  }
+    </div>
+  </div>`;
 }
 
 function refreshEditLists() {
   document.getElementById('edit-verse-list').innerHTML = verses.map(verseItemHTML).join('');
-  renderRemovedVerses();
+  renderSuggestions();
 }
 
-function renderRemovedVerses() {
-  const sec  = document.getElementById('removed-verse-section');
-  const list = document.getElementById('removed-verse-list');
-  if (!removedVerses.length) { sec.style.display = 'none'; list.innerHTML = ''; return; }
-  sec.style.display = '';
-  list.innerHTML = removedVerses.map(ref => {
-    const safeRef = ref.replace(/"/g, '&quot;');
-    return `<div class="removed-verse-item">
-      <span class="removed-verse-ref">${ref}</span>
-      <button class="btn-restore-verse" onclick="restoreVerse(this)" data-ref="${safeRef}">↩ Gjenopprett</button>
+// ── SUGGESTIONS (vers andre profiler har lagt inn) ──
+
+let suggestFilterText = '';
+let suggestListCache = [];   // items currently rendered, indexed for the click handler
+
+function renderSuggestions() {
+  const list = document.getElementById('suggest-list');
+  if (!list) return;
+  const myRefs = new Set(verses.map(v => v.ref));
+  const q = suggestFilterText.trim().toLowerCase();
+  suggestListCache = otherProfilesVerses
+    .filter(v => !myRefs.has(v.ref))
+    .filter(v => !q || v.ref.toLowerCase().includes(q) || v.text.toLowerCase().includes(q))
+    .sort((a, b) => a.ref.localeCompare(b.ref, 'no', { numeric: true }));
+  if (!suggestListCache.length) { list.innerHTML = '<div class="suggest-empty">Ingen forslag tilgjengelig ennå.</div>'; return; }
+  list.innerHTML = suggestListCache.map((v, i) => {
+    const safeText = v.text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<div class="suggest-item">
+      <div class="suggest-info">
+        <div class="suggest-ref">${v.ref}</div>
+        <div class="suggest-text">${safeText}</div>
+        <span class="suggest-tag">lagt til av ${esc(v.owners.join(', '))}</span>
+      </div>
+      <button class="btn-add-suggest" data-idx="${i}">+ Legg til</button>
     </div>`;
   }).join('');
 }
@@ -1416,17 +1566,12 @@ function openEditModal() {
   document.getElementById('new-verse-paste').value = '';
   document.getElementById('edit-status').textContent = '';
   document.getElementById('save-edits-btn').disabled = true;   // no text changes yet
+  document.getElementById('suggest-filter').value = '';
+  suggestFilterText = '';
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
 function closeEditModal() { document.getElementById('edit-modal').classList.add('hidden'); }
-
-function resetVerse(btn) {
-  const ref = btn.dataset.ref;
-  btn.closest('.edit-verse-item').querySelector('textarea').value = defaultVerseTexts[ref];
-  btn.style.visibility = 'hidden';
-  document.getElementById('save-edits-btn').disabled = false;   // resetting is a change to save
-}
 
 // Parse a verse copied from the YouVersion app, e.g.
 //   "Matteus 6:33-34 N11BM
@@ -1474,73 +1619,47 @@ function addNewVerse() {
   const st   = document.getElementById('edit-status');
   if (!ref || !text) { st.textContent = 'Fyll inn referanse og tekst.'; st.className = 'cfg-status error'; return; }
   if (verses.find(v => v.ref === ref)) { st.textContent = 'Et vers med denne referansen finnes allerede.'; st.className = 'cfg-status error'; return; }
-  addedVerses.push({ref, text});
-  verses.push({ref, text});
-  saveAddedVerses();
+  addVerseToMyList(ref, text);
   document.getElementById('edit-verse-list').insertAdjacentHTML('beforeend', verseItemHTML({ref, text}));
   document.getElementById('new-verse-ref').value = '';
   document.getElementById('new-verse-text').value = '';
   document.getElementById('new-verse-paste').value = '';
   st.textContent = 'Vers lagt til!'; st.className = 'cfg-status ok';
   updateProgress();
+  renderSuggestions();
   cloudSave().then(() => { setTimeout(() => { if (st.textContent === 'Vers lagt til!') st.textContent = ''; }, 2000); });
 }
 
 function deleteVerse(btn) {
   const ref = btn.dataset.ref;
   const st  = document.getElementById('edit-status');
-  if (verses.length <= 1) {
-    st.textContent = 'Kan ikke fjerne det siste verset.'; st.className = 'cfg-status error';
-    return;
-  }
-  if (defaultVerseTexts[ref] !== undefined) {
-    // Built-in verse: mark as removed so it stays gone across reloads.
-    if (!removedVerses.includes(ref)) removedVerses.push(ref);
-    saveRemovedVerses();
-    if (verseOverrides[ref]) { delete verseOverrides[ref]; saveVerseOverrides(); }
-  } else {
-    // User-added verse: drop it entirely.
-    const ai = addedVerses.findIndex(v => v.ref === ref);
-    if (ai < 0) return;
-    addedVerses.splice(ai, 1);
-    saveAddedVerses();
-  }
+  const i = myVerses.findIndex(v => v.ref === ref);
+  if (i < 0) return;
+  myVerses.splice(i, 1);
+  saveMyVerses();
   rebuildVerses();
   btn.closest('.edit-verse-item').remove();
-  renderRemovedVerses();
   if (currentVerse?.ref === ref) {
-    const sel = selectNextVerse();
-    currentVerse = sel.verse; currentDir = sel.dir;
-    renderPrompt();
-    updatePrevScore();
-    document.getElementById('result-panel').classList.add('hidden');
-    ['user-input','submit-btn','reveal-btn','mic-btn'].forEach(id => document.getElementById(id).disabled = false);
-    document.getElementById('user-input').value = '';
+    if (verses.length) {
+      const sel = selectNextVerse();
+      currentVerse = sel.verse; currentDir = sel.dir;
+      renderPrompt();
+      updatePrevScore();
+      document.getElementById('result-panel').classList.add('hidden');
+      ['user-input','submit-btn','reveal-btn','mic-btn'].forEach(id => document.getElementById(id).disabled = false);
+      document.getElementById('user-input').value = '';
+    } else {
+      currentVerse = null;
+    }
   }
   delete history[ref];
   saveHistory();
   updateProgress();
   renderHistory(null);
+  refreshQuizVisibility();
+  renderSuggestions();
   st.textContent = 'Vers slettet.'; st.className = 'cfg-status ok';
   cloudSave().then(() => { setTimeout(() => { if (st.textContent === 'Vers slettet.') st.textContent = ''; }, 2000); });
-}
-
-function restoreVerse(btn) {
-  const ref = btn.dataset.ref;
-  const i = removedVerses.indexOf(ref);
-  if (i < 0) return;
-  removedVerses.splice(i, 1);
-  saveRemovedVerses();
-  rebuildVerses();
-  // Add the restored verse back to the edit list without clobbering other unsaved edits
-  const v = verses.find(x => x.ref === ref);
-  if (v) document.getElementById('edit-verse-list').insertAdjacentHTML('beforeend', verseItemHTML(v));
-  renderRemovedVerses();
-  updateProgress();
-  renderHistory(null);
-  const st = document.getElementById('edit-status');
-  st.textContent = 'Vers gjenopprettet.'; st.className = 'cfg-status ok';
-  cloudSave().then(() => { setTimeout(() => { if (st.textContent === 'Vers gjenopprettet.') st.textContent = ''; }, 2000); });
 }
 
 function saveVerseEdits() {
@@ -1548,26 +1667,12 @@ function saveVerseEdits() {
   document.querySelectorAll('#edit-verse-list .edit-verse-ta').forEach(ta => {
     const ref = ta.dataset.ref;
     const newText = ta.value.trim();
-    if (defaultVerseTexts[ref] !== undefined) {
-      if (newText && newText !== defaultVerseTexts[ref]) {
-        if (verseOverrides[ref] !== newText) { verseOverrides[ref] = newText; changed = true; }
-      } else if (verseOverrides[ref]) {
-        delete verseOverrides[ref]; changed = true;
-      }
-    } else {
-      const av = addedVerses.find(v => v.ref === ref);
-      if (av && newText && av.text !== newText) {
-        av.text = newText;
-        const ve = verses.find(v => v.ref === ref);
-        if (ve) ve.text = newText;
-        changed = true;
-      }
-    }
+    const v = myVerses.find(x => x.ref === ref);
+    if (v && newText && v.text !== newText) { v.text = newText; changed = true; }
   });
   if (changed) {
-    saveVerseOverrides();
-    saveAddedVerses();
-    applyVerseOverrides();
+    saveMyVerses();
+    rebuildVerses();
     if (currentVerse) {
       const updated = verses.find(v => v.ref === currentVerse.ref);
       if (updated) currentVerse = updated;
@@ -1585,7 +1690,8 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape') { closeSettings(); closeEditModal(); closeChartModal(); return; }
   const modalOpen = !document.getElementById('settings-modal').classList.contains('hidden')
                  || !document.getElementById('edit-modal').classList.contains('hidden')
-                 || !document.getElementById('chart-modal').classList.contains('hidden');
+                 || !document.getElementById('chart-modal').classList.contains('hidden')
+                 || !document.getElementById('profile-modal').classList.contains('hidden');
   if(modalOpen) return;
   if(e.ctrlKey&&e.key==='Enter') {
     // Ctrl+Enter: sjekk svaret når man skriver, gå til neste vers når resultatet vises
@@ -1602,6 +1708,28 @@ document.getElementById('edit-verse-list').addEventListener('input', e => {
 });
 // Auto-parse a YouVersion paste into the reference/text fields (silent if it doesn't match)
 document.getElementById('new-verse-paste').addEventListener('paste', () => setTimeout(() => parsePastedVerse(false), 0));
+// Profile name modal: Enter submits the name step
+document.getElementById('profile-name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitProfileName();
+});
+// Suggestions: filter typing + "+ Legg til" clicks
+document.getElementById('suggest-filter').addEventListener('input', e => {
+  suggestFilterText = e.target.value;
+  renderSuggestions();
+});
+document.getElementById('suggest-list').addEventListener('click', e => {
+  const btn = e.target.closest('.btn-add-suggest');
+  if (!btn) return;
+  const item = suggestListCache[+btn.dataset.idx];
+  if (!item || verses.find(v => v.ref === item.ref)) return;   // already added meanwhile
+  addVerseToMyList(item.ref, item.text);
+  document.getElementById('edit-verse-list').insertAdjacentHTML('beforeend', verseItemHTML(item));
+  updateProgress();
+  renderSuggestions();
+  const st = document.getElementById('edit-status');
+  st.textContent = 'Vers lagt til fra forslag!'; st.className = 'cfg-status ok';
+  cloudSave().then(() => { setTimeout(() => { if (st.textContent === 'Vers lagt til fra forslag!') st.textContent = ''; }, 2000); });
+});
 
 // ── PROGRESS CHART ──
 
@@ -1711,8 +1839,8 @@ function buildChartSVG(ref, dir) {
 }
 
 function verseTextFor(ref) {
-  const v = verses.find(x => x.ref === ref);
-  return v ? v.text : (verseOverrides[ref] || defaultVerseTexts[ref] || null);
+  const v = verses.find(x => x.ref === ref) || myVerses.find(x => x.ref === ref);
+  return v ? v.text : null;
 }
 
 function openChartModal(ref, dir) {
@@ -2056,77 +2184,153 @@ document.getElementById('chart-body').addEventListener('change', e => {
   else if (e.target.id === 'tbl-to')   { tblTo   = e.target.value ? new Date(e.target.value + 'T23:59:59').getTime() : null; renderOverviewTable(); }
 });
 
+// ── MIGRATION: single-profile data → "per helge" ──
+
+const LEGACY_KEYS = ['bibelvers-history-v2', 'bibelvers-verses-v1', 'bibelvers-added-v1', 'bibelvers-removed-v1'];
+const BACKUP_KEY = 'bibelvers-backup-preprofiles-v1';
+
+function hasLegacyData() { return LEGACY_KEYS.some(k => localStorage.getItem(k) !== null); }
+
+// One-time safety net: snapshot the pre-profile data into localStorage AND a downloaded
+// .json file, so nothing is lost if the migration below has a bug.
+function backupLegacyDataOnce() {
+  if (localStorage.getItem(BACKUP_KEY)) return;
+  if (!hasLegacyData()) return;
+  const snapshot = { savedAt: new Date().toISOString() };
+  for (const k of LEGACY_KEYS) snapshot[k] = localStorage.getItem(k);
+  const json = JSON.stringify(snapshot);
+  localStorage.setItem(BACKUP_KEY, json);
+  try {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'bibelvers-backup-' + new Date().toISOString().slice(0,10) + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  } catch {}
+}
+
+// Folds the old single-profile localStorage keys into a flat "per helge" verse list +
+// history, exactly once. Old keys are left untouched afterwards.
+function migrateLegacyToPerHelge() {
+  const key = 'per helge';
+  if (getLocalProfiles()[key]) return;
+  if (!hasLegacyData()) return;
+  let overrides = {}, added = [], removed = [];
+  try { overrides = JSON.parse(localStorage.getItem('bibelvers-verses-v1') || '{}'); } catch {}
+  try { added      = JSON.parse(localStorage.getItem('bibelvers-added-v1') || '[]'); } catch {}
+  try { removed    = JSON.parse(localStorage.getItem('bibelvers-removed-v1') || '[]'); } catch {}
+  const seeded = [];
+  for (const bv of DEFAULT_VERSES) {
+    if (removed.includes(bv.ref)) continue;
+    seeded.push({ ref: bv.ref, text: overrides[bv.ref] || bv.text });
+  }
+  for (const av of added) if (av?.ref && av?.text && !seeded.find(v => v.ref === av.ref)) seeded.push({ ref: av.ref, text: av.text });
+  localStorage.setItem(profileVersesKey(key), JSON.stringify(seeded));
+  const oldHistory = localStorage.getItem('bibelvers-history-v2');
+  if (oldHistory) localStorage.setItem(profileHistoryKey(key), oldHistory);
+  const profiles = getLocalProfiles();
+  profiles[key] = 'per helge';
+  saveLocalProfiles(profiles);
+}
+
 // ── INIT ──
 
 let currentVerse=null;
 let currentDir='r2t';
-loadHistory();
-loadVerseOverrides();
-loadAddedVerses();
-loadRemovedVerses();
-rebuildVerses();
-updateEditBtn();
 
-let dirty = false;
-// Migrate renamed verse ref (move the whole entry, whatever shape it has)
-if (history['Salomos Ordspråk 4:23'] && !history['Ordspråkene 4:23']) {
-  history['Ordspråkene 4:23'] = history['Salomos Ordspråk 4:23'];
-  delete history['Salomos Ordspråk 4:23']; dirty = true;
-}
-// Normalize every entry to the per-direction shape { r2t?, t2r? }; legacy flat
-// entries become r2t; junk (e.g. the {"init":true} placeholder) is dropped.
-// Also ensure each direction has an attempts series for the progress chart.
-for (const [ref, entry] of Object.entries(history)) {
-  const wasLegacy = entry && typeof entry === 'object' && typeof entry.score === 'number' && !entry.r2t && !entry.t2r;
-  const norm = normalizeEntry(entry);
-  if (!norm) { delete history[ref]; dirty = true; continue; }
-  for (const dir of DIRS) {
-    if (norm[dir] && !Array.isArray(norm[dir].attempts)) {
-      norm[dir].attempts = ensureAttempts(norm[dir]); dirty = true;
-    }
-  }
-  history[ref] = norm;
-  if (wasLegacy) dirty = true;
-}
-// Remove stale refs that no longer exist in the verse list
-{ const validRefs = new Set(verses.map(v => v.ref));
-  for (const ref of Object.keys(history)) {
-    if (!validRefs.has(ref)) { delete history[ref]; dirty = true; }
-  }
-}
-if (dirty) saveHistory();
+backupLegacyDataOnce();
+// Only auto-continue as "per helge" the very first time the migration actually runs —
+// once it's done, logging out must show the name modal like any other profile, even
+// though the old pre-profile keys are deliberately kept around as a backup.
+const isFirstMigration = hasLegacyData() && !getLocalProfiles()['per helge'];
+migrateLegacyToPerHelge();
+if (isFirstMigration && !getCurrentProfileKey()) setCurrentProfile('per helge', 'per helge');
 
-// Migrate v1 data (no timestamp) to v2, into the r2t direction
-try {
-  const old=JSON.parse(localStorage.getItem('bibelvers-history-v1')||'{}');
-  let v1Changed=false;
-  for (const [ref,d] of Object.entries(old)) {
-    if (!history[ref]) { const n=normalizeEntry({...d, timestamp:d.timestamp||Date.now()}); if (n) { history[ref]=n; v1Changed=true; } }
-  }
-  if (v1Changed) saveHistory();
-} catch {}
-
-if (getConfig()) {
-  cloudLoad().then(ok => {
-    renderHistory(null);
-    updateProgress();
-    // After cloud merge, re-select if the current verse+direction now has a score
-    if (ok && currentVerse && history[currentVerse.ref]?.[currentDir]) {
-      const sel = selectNextVerse();
-      currentVerse = sel.verse; currentDir = sel.dir;
-      renderPrompt();
-    }
-    updatePrevScore();
-  });
+const activeProfileKey = getCurrentProfileKey();
+if (!activeProfileKey) {
+  showProfileModal();
 } else {
-  setSyncStatus('idle');
+  runApp(activeProfileKey);
 }
 
-{ const sel = selectNextVerse(); currentVerse = sel.verse; currentDir = sel.dir; }
-renderPrompt();
-updatePrevScore();
-updateProgress();
-renderHistory(null);
+function runApp(profileKey) {
+  renderProfileBadge();
+  loadHistory();
+  loadMyVerses();
+  rebuildVerses();
+
+  let dirty = false;
+  if (profileKey === 'per helge') {
+    // Migrate renamed verse ref from the pre-profile era (move whatever shape it has)
+    if (history['Salomos Ordspråk 4:23'] && !history['Ordspråkene 4:23']) {
+      history['Ordspråkene 4:23'] = history['Salomos Ordspråk 4:23'];
+      delete history['Salomos Ordspråk 4:23']; dirty = true;
+    }
+  }
+  // Normalize every entry to the per-direction shape { r2t?, t2r? }; legacy flat
+  // entries become r2t; junk (e.g. the {"init":true} placeholder) is dropped.
+  // Also ensure each direction has an attempts series for the progress chart.
+  for (const [ref, entry] of Object.entries(history)) {
+    const wasLegacy = entry && typeof entry === 'object' && typeof entry.score === 'number' && !entry.r2t && !entry.t2r;
+    const norm = normalizeEntry(entry);
+    if (!norm) { delete history[ref]; dirty = true; continue; }
+    for (const dir of DIRS) {
+      if (norm[dir] && !Array.isArray(norm[dir].attempts)) {
+        norm[dir].attempts = ensureAttempts(norm[dir]); dirty = true;
+      }
+    }
+    history[ref] = norm;
+    if (wasLegacy) dirty = true;
+  }
+  // Remove stale refs that no longer exist in the verse list
+  { const validRefs = new Set(verses.map(v => v.ref));
+    for (const ref of Object.keys(history)) {
+      if (!validRefs.has(ref)) { delete history[ref]; dirty = true; }
+    }
+  }
+  if (dirty) saveHistory();
+
+  if (profileKey === 'per helge') {
+    // Migrate ancient v1 data (no timestamp) to v2, into the r2t direction
+    try {
+      const old=JSON.parse(localStorage.getItem('bibelvers-history-v1')||'{}');
+      let v1Changed=false;
+      for (const [ref,d] of Object.entries(old)) {
+        if (!history[ref]) { const n=normalizeEntry({...d, timestamp:d.timestamp||Date.now()}); if (n) { history[ref]=n; v1Changed=true; } }
+      }
+      if (v1Changed) saveHistory();
+    } catch {}
+  }
+
+  refreshOtherProfilesVerses();
+
+  if (getConfig()?.binId && getConfig()?.apiKey) {
+    cloudLoad().then(ok => {
+      renderHistory(null);
+      updateProgress();
+      renderSuggestions();
+      // After cloud merge, re-select if the current verse+direction now has a score
+      if (ok && currentVerse && history[currentVerse.ref]?.[currentDir]) {
+        const sel = selectNextVerse();
+        currentVerse = sel.verse; currentDir = sel.dir;
+        renderPrompt();
+      }
+      updatePrevScore();
+    });
+  } else {
+    setSyncStatus('idle');
+  }
+
+  if (verses.length) {
+    const sel = selectNextVerse(); currentVerse = sel.verse; currentDir = sel.dir;
+    renderPrompt();
+    updatePrevScore();
+  }
+  refreshQuizVisibility();
+  updateProgress();
+  renderHistory(null);
+}
 </script>
 </body>
 </html>
