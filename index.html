@@ -1080,8 +1080,20 @@ function selectNextVerse() {
 
 // ── SCORING ──
 
+// Folds accented letter variants onto their base letter (é/ê/è/ë → e, etc.) so answers
+// aren't marked wrong purely for missing/wrong diacritics. Norwegian's own distinct letters
+// (æ, ø, å) are untouched — they don't decompose into base+accent under NFD.
+function foldDiacritics(t) {
+  let out = '';
+  for (const ch of t.normalize('NFD')) {
+    const code = ch.codePointAt(0);
+    if (code < 768 || code > 879) out += ch;   // drop combining diacritical marks (Unicode block 0300-036F)
+  }
+  return out;
+}
+
 function normalize(t) {
-  return t.toLowerCase()
+  return foldDiacritics(t.toLowerCase())
     .replace(/\[\d+\]/g,' ').replace(/[«»""'']/g,'')
     .replace(/[.,!?;:\-–—{}()[\]]/g,' ').replace(/\s+/g,' ').trim();
 }
@@ -1107,7 +1119,7 @@ function scoreVerse(userText, correctText) {
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function tokenize(text) {
   return text.split(/\s+/).filter(Boolean)
-    .map(w=>({orig:w, norm:w.toLowerCase().replace(/[«»""''.,!?;:\-–—{}()[\]]/g,'')}))
+    .map(w=>({orig:w, norm:foldDiacritics(w.toLowerCase().replace(/[«»""''.,!?;:\-–—{}()[\]]/g,''))}))
     .filter(t=>t.norm.length>0);
 }
 function lcsOps(uN,cN) {
@@ -1498,9 +1510,10 @@ function skipVerse() {
   nextVerse();
 }
 
-function nextVerse() {
-  const sel=selectNextVerse();
-  currentVerse=sel.verse; currentDir=sel.dir;
+// Puts a specific verse+direction into the quiz UI, ready to answer. Shared by "next verse"
+// (random pick) and "øv på dette verset nå" (explicit pick from the stats popup).
+function loadVerseIntoQuiz(verse, dir) {
+  currentVerse=verse; currentDir=dir;
   renderPrompt();
   updatePrevScore();
   document.getElementById('user-input').value='';
@@ -1509,6 +1522,11 @@ function nextVerse() {
   document.getElementById('diff-user-block').classList.remove('hidden');
   document.querySelector('.diff-legend').classList.remove('hidden');
   updateProgress();
+}
+
+function nextVerse() {
+  const sel=selectNextVerse();
+  loadVerseIntoQuiz(sel.verse, sel.dir);
   document.getElementById('user-input').focus();
 }
 
@@ -1850,7 +1868,13 @@ function openChartModal(ref, dir) {
   document.getElementById('chart-title').textContent = ref + ' · ' + DIR_META[dir].dirLabel;
   const text = verseTextFor(ref);
   const verseHTML = text ? `<div class="chart-verse">${esc(text)}</div>` : '';
-  document.getElementById('chart-body').innerHTML = verseHTML + buildChartSVG(ref, dir);
+  const safeRef = ref.replace(/"/g, '&quot;');
+  const testBtnHTML = verses.find(v => v.ref === ref)
+    ? `<div style="text-align:center;margin-top:14px">
+         <button class="btn-modal-save" data-act="test-verse" data-ref="${safeRef}" data-dir="${dir}">▶ Øv på dette verset nå</button>
+       </div>`
+    : '';
+  document.getElementById('chart-body').innerHTML = verseHTML + buildChartSVG(ref, dir) + testBtnHTML;
   document.getElementById('chart-modal').classList.remove('hidden');
 }
 function closeChartModal() { document.getElementById('chart-modal').classList.add('hidden'); }
@@ -2132,6 +2156,18 @@ document.getElementById('history-list').addEventListener('click', e => {
 
 // Overview interactions (delegated on the stable chart-body element)
 document.getElementById('chart-body').addEventListener('click', e => {
+  // "Øv på dette verset nå" — close the stats popup and jump straight to testing this verse+direction
+  const testBtn = e.target.closest('[data-act="test-verse"]');
+  if (testBtn) {
+    const v = verses.find(x => x.ref === testBtn.dataset.ref);
+    if (v) {
+      closeChartModal();
+      loadVerseIntoQuiz(v, testBtn.dataset.dir);
+      document.querySelector('.quiz-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('user-input').focus();
+    }
+    return;
+  }
   // Table: sort by a column header
   const th = e.target.closest('.tbl-th');
   if (th && th.dataset.key) {
