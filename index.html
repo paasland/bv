@@ -410,22 +410,48 @@
       <button class="modal-close" onclick="closeSettings()">✕</button>
     </div>
     <div class="modal-body">
-      <h3>Cloud-synkronisering</h3>
-      <p>Lagre historikken online for å fortsette på andre enheter. Gratis med <a href="https://jsonbin.io" target="_blank" rel="noopener">JSONBin.io</a>.</p>
+      <div id="admin-section" class="hidden">
+        <h3>Admin</h3>
+        <p id="admin-stats" class="cfg-status"></p>
+      </div>
+      <h3>Cloud-synkronisering (Firebase)</h3>
+      <p>Lagre historikken online for å fortsette på andre enheter. Gratis med <a href="https://firebase.google.com" target="_blank" rel="noopener">Firebase Realtime Database</a> – tåler langt mer bruk enn den forrige løsningen (JSONBin), som hadde en engangskvote på 10 000 forespørsler totalt og ikke fornyes.</p>
       <ol class="setup-steps">
-        <li>Opprett gratis konto på <a href="https://jsonbin.io" target="_blank" rel="noopener">jsonbin.io</a></li>
-        <li>Klikk «New Bin», lim inn <code>{"init":true}</code>, klikk «Create Bin»</li>
-        <li>Kopier Bin-IDen fra URL-en</li>
-        <li>Gå til «API Keys» og kopier Master Key</li>
+        <li>Gå til <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> og opprett et gratis prosjekt</li>
+        <li>Velg «Build → Realtime Database» → «Create Database» (velg en region)</li>
+        <li>Gå til fanen «Rules», lim inn dette og klikk «Publish»:<br><code style="display:block;white-space:pre-wrap;margin-top:4px;padding:6px 8px">{"rules":{"app":{".read":true,".write":true},".read":false,".write":false}}</code></li>
+        <li>Kopier database-URLen (vises øverst på Realtime Database-siden)</li>
+        <li>Lag selv en lang, tilfeldig «hemmelig sti» (eller bruk 🎲-knappen) – siden reglene over gir tilgang til alle som kjenner stien, er denne din eneste beskyttelse</li>
       </ol>
-      <label>Bin ID</label>
-      <input type="text" id="cfg-bin-id" placeholder="66xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
-      <label>Master Key</label>
-      <input type="password" id="cfg-api-key" placeholder="$2b$10$..." autocomplete="off">
+      <label>Firebase database-URL</label>
+      <input type="text" id="cfg-fb-url" placeholder="https://ditt-prosjekt-default-rtdb.europe-west1.firebasedatabase.app" autocomplete="off">
+      <label>Hemmelig sti</label>
+      <div style="display:flex;gap:6px">
+        <input type="password" id="cfg-fb-secret" placeholder="en lang, tilfeldig tekst" autocomplete="off" style="flex:1">
+        <button class="btn-modal-test" onclick="generateFbSecret()" title="Generer en tilfeldig hemmelig sti">🎲</button>
+      </div>
       <div class="modal-btns">
         <button class="btn-modal-test" onclick="testConnection()">Test tilkobling</button>
       </div>
       <div id="cfg-status" class="cfg-status"></div>
+
+      <div class="add-verse-section">
+        <div class="add-verse-section-title">Overfør historikk fra JSONBin (én gang)</div>
+        <p>Flytter alle profiler fra din gamle JSONBin-bin til Firebase. Lagre Firebase-innstillingene over først.</p>
+        <label>Gammel Bin ID</label>
+        <input type="text" id="cfg-old-bin-id" placeholder="66xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+        <label>Gammel Master Key</label>
+        <input type="password" id="cfg-old-api-key" placeholder="$2b$10$..." autocomplete="off">
+        <div class="modal-btns">
+          <button class="btn-modal-test" onclick="importFromJsonBinAuto()">↧ Hent automatisk fra JSONBin</button>
+        </div>
+        <p style="margin-top:10px">Fungerer ikke henting (f.eks. fordi kvoten er brukt opp)? Åpne binen din på <a href="https://jsonbin.io" target="_blank" rel="noopener">jsonbin.io</a> (Bins → din bin), kopier hele JSON-innholdet, og lim inn her:</p>
+        <textarea id="import-json-paste" rows="4" placeholder='{"profiles": {...}}'></textarea>
+        <div style="margin-top:6px">
+          <button class="btn-modal-test" onclick="importFromPastedJSON()">↧ Importer limt inn JSON</button>
+        </div>
+        <div id="import-status" class="cfg-status"></div>
+      </div>
 
       <h3 style="margin-top:24px">Tale-til-tekst (valgfritt)</h3>
       <p>Bedre stemmegjenkjenning via OpenAI. <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Lag en API-nøkkel</a> (krever forhåndsbetalt kreditt). Nøkkelen lagres kun i din nettleser og sendes direkte til OpenAI. Uten nøkkel brukes nettleserens innebygde gjenkjenning.</p>
@@ -500,7 +526,7 @@
     <span class="header-title">✝ Bibelvers Quiz</span>
     <div class="header-right">
       <span class="profile-badge" id="profile-badge"></span>
-      <span class="sync-dot idle" id="sync-dot" title="Synkroniseringsstatus"></span>
+      <span class="sync-dot idle" id="sync-dot" title="Synkroniseringsstatus" onclick="showSyncError()" style="cursor:pointer"></span>
       <button class="btn-icon" id="edit-btn" onclick="openEditModal()" title="Rediger vers">✏</button>
       <button class="btn-icon" onclick="openSettings()" title="Innstillinger">⚙</button>
       <button class="btn-icon hidden" id="logout-btn" onclick="logoutProfile()" title="Logg ut">⎋</button>
@@ -588,8 +614,13 @@ let lastCloudProfiles = null;      // raw {key:{displayName,history,verses}} fro
 let otherProfilesVerses = [];      // [{ref,text,owners:[names]}] — suggestion pool
 let pendingProfileKey = null, pendingProfileName = null;
 
+// Firebase Realtime Database forbids . $ # [ ] / (and control chars) in a key or
+// path segment — encodeURIComponent alone isn't enough since "." passes through
+// it unescaped. Used for profile keys and for the user-chosen secret path alike.
+function fbSanitizeSegment(s) { return String(s).replace(/[.$#[\]/]/g, '_'); }
+
 function normalizeProfileName(raw) { return raw.replace(/\s+/g, ' ').trim(); }
-function profileKeyFor(name) { return normalizeProfileName(name).toLowerCase(); }
+function profileKeyFor(name) { return fbSanitizeSegment(normalizeProfileName(name).toLowerCase()); }
 function profileHistoryKey(key) { return 'bibelvers-history-v2:' + key; }
 function profileVersesKey(key)  { return 'bibelvers-myverses-v1:' + key; }
 
@@ -644,13 +675,11 @@ async function submitProfileName() {
     try { verseCount = JSON.parse(localStorage.getItem(profileVersesKey(key)) || '[]').length; } catch {}
   }
   const cfg = getConfig();
-  if (cfg?.binId && cfg?.apiKey) {
+  if (fbConfigured(cfg)) {
     try {
-      const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, { headers:{'X-Master-Key':cfg.apiKey} });
+      const r = await fetch(`${fbBase(cfg)}/profiles/${encodeURIComponent(fbSanitizeSegment(key))}.json`);
       if (r.ok) {
-        const cloud = (await r.json()).record || {};
-        lastCloudProfiles = (cloud.profiles && typeof cloud.profiles === 'object') ? cloud.profiles : null;
-        const cp = lastCloudProfiles?.[key];
+        const cp = await r.json();
         if (cp) { isExisting = true; displayName = cp.displayName || displayName; verseCount = (cp.verses || []).length; }
       }
     } catch {}
@@ -706,7 +735,12 @@ function refreshOtherProfilesVerses() {
   otherProfilesVerses = mergeSuggestionOwners(pool);
 }
 
-// ── CONFIG / CLOUD ──
+// ── CONFIG / CLOUD (Firebase Realtime Database) ──
+//
+// Every profile writes only to its own node (/app/<secret>/profiles/<key>), so
+// unlike the old JSONBin setup there's no whole-tree read-modify-write needed —
+// a save from one profile can never clobber another's data, and each save is a
+// single request instead of two.
 
 const CONFIG_KEY = 'bibelvers-config-v1';
 
@@ -715,29 +749,65 @@ function getConfig() {
 }
 function setConfig(cfg) { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); }
 
-function setSyncStatus(s) {
+function fbConfigured(cfg) { return !!(cfg?.fbUrl && cfg?.fbSecret); }
+// The "secret" is just an unguessable path segment (not real auth) — see the
+// Settings modal's open .read/.write rule for the /app subtree. It's run through
+// fbSanitizeSegment first since a stray "." in a user-chosen secret would otherwise
+// slip past encodeURIComponent and land in Firebase as a literal, forbidden character.
+function fbBase(cfg) { return `${cfg.fbUrl.replace(/\/+$/, '')}/app/${encodeURIComponent(fbSanitizeSegment(cfg.fbSecret))}`; }
+
+// The dot's native "title" tooltip vanishes the moment you try to select or
+// screenshot it, so the full text is also kept here — click the dot to see it
+// in an alert() instead, where it can actually be selected and copied.
+let lastSyncError = null;
+
+function setSyncStatus(s, detail) {
   const d = document.getElementById('sync-dot');
   d.className = 'sync-dot ' + s;
-  d.title = { idle:'Ikke konfigurert', syncing:'Synkroniserer…', ok:'Synkronisert', error:'Feil', offline:'Frakoblet' }[s] || s;
+  const base = { idle:'Ikke konfigurert', syncing:'Synkroniserer…', ok:'Synkronisert', error:'Feil', offline:'Frakoblet' }[s] || s;
+  d.title = detail ? `${base}: ${detail} (klikk for å kopiere)` : base;
+  if (s === 'error' || s === 'offline') lastSyncError = detail ? `${base}: ${detail}` : base;
+  else lastSyncError = null;
+}
+
+function showSyncError() {
+  alert(lastSyncError || 'Ingen feil å vise – synkronisering ser OK ut.');
+}
+
+// Cloud history is stored as an array of {ref, r2t?, t2r?} rather than an object
+// keyed by ref, because verse refs like "1. Mosebok 1:1" contain "." — a character
+// Firebase Realtime Database forbids in an object key. These two helpers convert
+// between that wire format and [ref, entry] pairs, and also tolerate the old
+// ref-keyed-object shape (e.g. data freshly imported from JSONBin).
+function cloudHistoryEntries(hist) {
+  if (Array.isArray(hist)) return hist.filter(item => item?.ref).map(item => [item.ref, item]);
+  if (hist && typeof hist === 'object') return Object.entries(hist);
+  return [];
+}
+function toCloudHistoryList(hist) {
+  return cloudHistoryEntries(hist).map(([ref, entry]) => ({ ref, ...entry }));
 }
 
 async function cloudLoad() {
   const cfg = getConfig();
-  if (!cfg?.binId || !cfg?.apiKey) return false;
-  const myKey = getCurrentProfileKey();
-  if (!myKey) return false;
+  if (!fbConfigured(cfg)) return false;
+  const rawKey = getCurrentProfileKey();
+  if (!rawKey) return false;
+  const myKey = fbSanitizeSegment(rawKey);   // must match the key cloudSave() actually wrote under
   setSyncStatus('syncing');
   try {
-    const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, {
-      headers: { 'X-Master-Key': cfg.apiKey }
-    });
-    if (!r.ok) { setSyncStatus('error'); return false; }
-    const cloud = (await r.json()).record || {};
-    lastCloudProfiles = (cloud.profiles && typeof cloud.profiles === 'object') ? cloud.profiles : null;
+    const r = await fetch(`${fbBase(cfg)}/profiles.json`);
+    if (!r.ok) {
+      const bodyText = await r.text().catch(() => '');
+      setSyncStatus('error', `henting feilet (${r.status} ${r.statusText}${bodyText ? ' – ' + bodyText : ''})`);
+      return false;
+    }
+    const cloud = await r.json();   // null if nothing saved yet
+    lastCloudProfiles = (cloud && typeof cloud === 'object') ? cloud : null;
     const mine = lastCloudProfiles?.[myKey];
     let changed = false;
     if (mine) {
-      for (const [ref, entry] of Object.entries(mine.history || {})) {
+      for (const [ref, entry] of cloudHistoryEntries(mine.history)) {
         const norm = normalizeEntry(entry);
         if (!norm) continue;
         for (const dir of DIRS) {
@@ -776,61 +846,174 @@ async function cloudLoad() {
     refreshOtherProfilesVerses();
     setSyncStatus('ok');
     return true;
-  } catch { setSyncStatus('offline'); return false; }
+  } catch (e) { setSyncStatus('offline', e?.message); return false; }
 }
 
 async function cloudSave() {
   const cfg = getConfig();
-  if (!cfg?.binId || !cfg?.apiKey) return;
-  const myKey = getCurrentProfileKey();
-  if (!myKey) return;
+  if (!fbConfigured(cfg)) return;
+  const rawKey = getCurrentProfileKey();
+  if (!rawKey) return;
+  const myKey = fbSanitizeSegment(rawKey);   // Firebase-safe form; rawKey stays for localStorage lookups
   setSyncStatus('syncing');
   try {
-    // Read-modify-write the whole bin so a save from one profile never clobbers another's data.
-    let full = {};
-    try {
-      const r = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, { headers: { 'X-Master-Key': cfg.apiKey } });
-      if (r.ok) full = (await r.json()).record || {};
-    } catch {}
-    if (!full.profiles || typeof full.profiles !== 'object') full.profiles = {};
-    const displayName = getLocalProfiles()[myKey] || myKey;
-    full.profiles[myKey] = { displayName, history, verses: myVerses };
-    lastCloudProfiles = full.profiles;
-    const r2 = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}`, {
+    const displayName = getLocalProfiles()[rawKey] || rawKey;
+    const payload = { displayName, history: toCloudHistoryList(history), verses: myVerses };
+    lastCloudProfiles = { ...(lastCloudProfiles || {}), [myKey]: payload };
+    const r = await fetch(`${fbBase(cfg)}/profiles/${encodeURIComponent(myKey)}.json`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.apiKey },
-      body: JSON.stringify(full)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
-    setSyncStatus(r2.ok ? 'ok' : 'error');
+    if (r.ok) {
+      setSyncStatus('ok');
+    } else {
+      const bodyText = await r.text().catch(() => '');
+      setSyncStatus('error', `lagring feilet (${r.status} ${r.statusText}${bodyText ? ' – ' + bodyText : ''})`);
+    }
     refreshOtherProfilesVerses();
-  } catch { setSyncStatus('offline'); }
+  } catch (e) { setSyncStatus('offline', e?.message); }
 }
 
 // ── SETTINGS ──
 
+function isAdminProfile() { return getCurrentProfileKey() === 'per helge'; }
+
 function openSettings() {
   const cfg = getConfig();
-  document.getElementById('cfg-bin-id').value  = cfg?.binId  || '';
-  document.getElementById('cfg-api-key').value = cfg?.apiKey || '';
+  document.getElementById('cfg-fb-url').value    = cfg?.fbUrl    || '';
+  document.getElementById('cfg-fb-secret').value = cfg?.fbSecret || '';
   document.getElementById('cfg-openai-key').value = cfg?.openaiKey || '';
   document.getElementById('cfg-status').textContent = '';
   document.getElementById('cfg-status').className = 'cfg-status';
   document.getElementById('oai-status').textContent = '';
   document.getElementById('oai-status').className = 'cfg-status';
+  document.getElementById('import-status').textContent = '';
+  document.getElementById('import-status').className = 'cfg-status';
+  document.getElementById('admin-section').classList.toggle('hidden', !isAdminProfile());
+  if (isAdminProfile()) refreshAdminStats();
   document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+function generateFbSecret() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const secret = [...bytes].map(b => b.toString(36)).join('').slice(0, 32);
+  document.getElementById('cfg-fb-secret').value = secret;
+}
+
+// Admin-only: fetches every profile directly from the cloud (not just this profile's
+// slice) so the counts reflect everyone who has ever synced, not just profiles this
+// browser happens to know about locally.
+async function refreshAdminStats() {
+  const el = document.getElementById('admin-stats');
+  if (!el) return;
+  const cfg = getConfig();
+  if (!fbConfigured(cfg)) {
+    el.textContent = 'Krever cloud-synkronisering (database-URL + hemmelig sti) for å hente statistikk.';
+    el.className = 'cfg-status';
+    return;
+  }
+  el.textContent = 'Henter statistikk…'; el.className = 'cfg-status loading';
+  try {
+    const r = await fetch(`${fbBase(cfg)}/profiles.json`);
+    if (!r.ok) { el.textContent = `Klarte ikke å hente statistikk (${r.status} ${r.statusText}).`; el.className = 'cfg-status error'; return; }
+    const profiles = (await r.json()) || {};
+    const profileCount = Object.keys(profiles).length;
+    let versesTested = 0;
+    for (const data of Object.values(profiles)) {
+      const histMap = new Map(cloudHistoryEntries(data?.history));
+      const verseList = Array.isArray(data?.verses) ? data.verses : [];
+      for (const v of verseList) {
+        if (!v?.ref) continue;
+        const norm = normalizeEntry(histMap.get(v.ref));
+        if (norm?.r2t || norm?.t2r) versesTested += countVersesInRef(v.ref);
+      }
+    }
+    el.textContent = `${profileCount} ${profileCount === 1 ? 'profil har' : 'profiler har'} vært i bruk · ${versesTested} bibelvers testet totalt`;
+    el.className = 'cfg-status ok';
+  } catch {
+    el.textContent = 'Frakoblet – klarte ikke å hente statistikk.';
+    el.className = 'cfg-status error';
+  }
 }
 function closeSettings() { document.getElementById('settings-modal').classList.add('hidden'); }
 
 function saveSettings() {
-  const binId     = document.getElementById('cfg-bin-id').value.trim();
-  const apiKey    = document.getElementById('cfg-api-key').value.trim();
+  const fbUrl     = document.getElementById('cfg-fb-url').value.trim();
+  const fbSecret  = document.getElementById('cfg-fb-secret').value.trim();
   const openaiKey = document.getElementById('cfg-openai-key').value.trim();
-  if ((binId && !apiKey) || (!binId && apiKey)) {
-    showCfgStatus('Fyll inn både Bin ID og Master Key (eller la begge stå tomme).', 'error'); return;
+  if ((fbUrl && !fbSecret) || (!fbUrl && fbSecret)) {
+    showCfgStatus('Fyll inn både database-URL og hemmelig sti (eller la begge stå tomme).', 'error'); return;
   }
-  setConfig({ binId, apiKey, openaiKey });
+  setConfig({ fbUrl, fbSecret, openaiKey });
   closeSettings();
-  if (binId && apiKey) cloudLoad().then(() => { renderHistory(null); updateProgress(); renderSuggestions(); });
+  if (fbUrl && fbSecret) cloudLoad().then(() => { renderHistory(null); updateProgress(); renderSuggestions(); });
+}
+
+// ── MIGRATION FROM JSONBIN ──
+
+// Writes each profile to its own Firebase node so an import never wipes out
+// profiles/keys already present there that aren't part of this import.
+async function importProfilesToFirebase(profilesObj, statusEl) {
+  const cfg = getConfig();
+  if (!fbConfigured(cfg)) {
+    statusEl.textContent = 'Sett opp og lagre Firebase-innstillingene over først.';
+    statusEl.className = 'cfg-status error';
+    return;
+  }
+  const keys = Object.keys(profilesObj || {});
+  if (!keys.length) { statusEl.textContent = 'Fant ingen profiler å importere.'; statusEl.className = 'cfg-status error'; return; }
+  statusEl.textContent = `Importerer ${keys.length} profiler…`; statusEl.className = 'cfg-status loading';
+  let ok = 0; const failed = [];
+  for (const key of keys) {
+    const data = profilesObj[key];
+    if (!data || typeof data !== 'object') continue;
+    // JSONBin stored history keyed by ref (e.g. "1. Mosebok 1:1", which contains a
+    // "." that Firebase forbids in a key) — convert to the array wire format first.
+    const converted = { ...data, history: toCloudHistoryList(data.history) };
+    try {
+      const r = await fetch(`${fbBase(cfg)}/profiles/${encodeURIComponent(fbSanitizeSegment(key))}.json`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(converted)
+      });
+      if (r.ok) ok++; else failed.push(key);
+    } catch { failed.push(key); }
+  }
+  statusEl.textContent = failed.length
+    ? `Importerte ${ok} av ${keys.length} profiler. Feilet: ${failed.join(', ')}`
+    : `✓ Importerte ${ok} profiler til Firebase!`;
+  statusEl.className = failed.length ? 'cfg-status error' : 'cfg-status ok';
+  if (getCurrentProfileKey() && profilesObj[getCurrentProfileKey()]) {
+    cloudLoad().then(() => { renderHistory(null); updateProgress(); renderSuggestions(); });
+  }
+}
+
+async function importFromJsonBinAuto() {
+  const binId  = document.getElementById('cfg-old-bin-id').value.trim();
+  const apiKey = document.getElementById('cfg-old-api-key').value.trim();
+  const st = document.getElementById('import-status');
+  if (!binId || !apiKey) { st.textContent = 'Fyll inn gammel Bin ID og Master Key.'; st.className = 'cfg-status error'; return; }
+  st.textContent = 'Henter fra JSONBin…'; st.className = 'cfg-status loading';
+  try {
+    const r = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, { headers: { 'X-Master-Key': apiKey } });
+    if (!r.ok) {
+      st.textContent = `Henting feilet (${r.status} ${r.statusText}). Prøv å lime inn JSON manuelt i stedet (kopiert fra jsonbin.io).`;
+      st.className = 'cfg-status error';
+      return;
+    }
+    const cloud = (await r.json()).record || {};
+    await importProfilesToFirebase(cloud.profiles || {}, st);
+  } catch { st.textContent = 'Frakoblet – sjekk internett.'; st.className = 'cfg-status error'; }
+}
+
+async function importFromPastedJSON() {
+  const raw = document.getElementById('import-json-paste').value.trim();
+  const st = document.getElementById('import-status');
+  if (!raw) { st.textContent = 'Lim inn JSON-innholdet fra binen først.'; st.className = 'cfg-status error'; return; }
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { st.textContent = 'Ugyldig JSON.'; st.className = 'cfg-status error'; return; }
+  // Accept either the raw JSONBin record ({profiles:{...}}) or the profiles map itself.
+  const profilesObj = (parsed?.profiles && typeof parsed.profiles === 'object') ? parsed.profiles : parsed;
+  await importProfilesToFirebase(profilesObj, st);
 }
 
 async function testOpenAI() {
@@ -850,17 +1033,17 @@ function showOaiStatus(msg, type) {
 }
 
 async function testConnection() {
-  const binId  = document.getElementById('cfg-bin-id').value.trim();
-  const apiKey = document.getElementById('cfg-api-key').value.trim();
-  if (!binId || !apiKey) { showCfgStatus('Fyll inn begge feltene.', 'error'); return; }
+  const fbUrl    = document.getElementById('cfg-fb-url').value.trim();
+  const fbSecret = document.getElementById('cfg-fb-secret').value.trim();
+  if (!fbUrl || !fbSecret) { showCfgStatus('Fyll inn begge feltene.', 'error'); return; }
   showCfgStatus('Tester…', 'loading');
   try {
-    const r = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, { headers:{'X-Master-Key':apiKey} });
-    if      (r.ok)           showCfgStatus('✓ Tilkobling vellykket!', 'ok');
-    else if (r.status===401) showCfgStatus('Feil API-nøkkel.', 'error');
-    else if (r.status===404) showCfgStatus('Bin-ID ikke funnet.', 'error');
-    else                     showCfgStatus(`Feil ${r.status}.`, 'error');
-  } catch { showCfgStatus('Frakoblet – sjekk internett.', 'error'); }
+    const r = await fetch(`${fbBase({ fbUrl, fbSecret })}/profiles.json`);
+    if      (r.ok)                          showCfgStatus('✓ Tilkobling vellykket!', 'ok');
+    else if (r.status===401||r.status===403) showCfgStatus('Tilgang avvist – sjekk «Rules» i Firebase-konsollen.', 'error');
+    else if (r.status===404)                showCfgStatus('Database-URL ikke funnet.', 'error');
+    else                                     showCfgStatus(`Feil ${r.status}.`, 'error');
+  } catch { showCfgStatus('Frakoblet – sjekk internett eller URL.', 'error'); }
 }
 
 function showCfgStatus(msg, type) {
@@ -2553,7 +2736,7 @@ function runApp(profileKey) {
 
   refreshOtherProfilesVerses();
 
-  if (getConfig()?.binId && getConfig()?.apiKey) {
+  if (fbConfigured(getConfig())) {
     // Never swap out the verse that's already on screen once cloud data arrives —
     // doing so used to yank the verse away mid-answer if sync finished late.
     cloudLoad().then(() => {
