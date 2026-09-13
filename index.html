@@ -245,7 +245,12 @@
     .modal-wide { max-width:620px; }
     .edit-verse-item { border-bottom:1px solid var(--border); padding:12px 0; }
     .edit-verse-item:last-child { border-bottom:none; }
-    .edit-verse-ref { font-size:.78rem; font-weight:bold; color:var(--gold); font-family:system-ui; margin-bottom:5px; }
+    .edit-verse-ref-input {
+      display:block; width:100%; font-size:.78rem; font-weight:bold; color:var(--gold); font-family:system-ui;
+      margin-bottom:5px; background:none; border:none; border-bottom:1px dashed transparent; padding:0 0 2px;
+    }
+    .edit-verse-ref-input:hover, .edit-verse-ref-input:focus { border-bottom-color:var(--border); }
+    .edit-verse-ref-input:focus { outline:none; border-bottom-color:var(--gold); }
     .edit-verse-item textarea {
       min-height:70px; margin-bottom:4px; font-size:.85rem; line-height:1.6;
     }
@@ -826,14 +831,36 @@ async function cloudLoad() {
           }
         }
       }
-      // Add any verse this profile has in the cloud but not yet locally (never overwrite local text).
       if (Array.isArray(mine.verses)) {
+        const cloudUpdatedAt = mine.versesUpdatedAt || 0;
+        const localUpdatedAt = getMyVersesUpdatedAt();
         let vChanged = false;
-        for (const v of mine.verses) {
-          if (!v?.ref || !v?.text) continue;
-          if (!myVerses.find(x => x.ref === v.ref)) { myVerses.push({ ref:v.ref, text:v.text }); vChanged = true; }
+        if (cloudUpdatedAt > localUpdatedAt) {
+          // Cloud copy is newer than whatever we last saved from this device — replace
+          // wholesale (not just additive) so a text/reference edit or a deletion made on
+          // another device actually propagates here instead of only ever growing the list.
+          const newList = mine.verses.filter(v => v?.ref && v?.text).map(v => ({ ref: v.ref, text: v.text }));
+          if (JSON.stringify(newList) !== JSON.stringify(myVerses)) { myVerses = newList; vChanged = true; }
+          if (vChanged) saveMyVerses(cloudUpdatedAt);
+        } else {
+          // Local is newer or equal (or neither side has ever stamped a version yet) —
+          // don't clobber possibly-unsynced local edits; just fold in verses the cloud has
+          // that this device doesn't know about yet (never overwrite local text/ref).
+          for (const v of mine.verses) {
+            if (!v?.ref || !v?.text) continue;
+            if (!myVerses.find(x => x.ref === v.ref)) { myVerses.push({ ref: v.ref, text: v.text }); vChanged = true; }
+          }
+          if (vChanged) saveMyVerses(Math.max(localUpdatedAt, cloudUpdatedAt));
         }
-        if (vChanged) { saveMyVerses(); rebuildVerses(); }
+        if (vChanged) {
+          rebuildVerses();
+          // The verse on screen may have been renamed or deleted elsewhere — swap it out
+          // only if it's actually gone, same as any other stale-reference cleanup here.
+          if (currentVerse && !verses.find(v => v.ref === currentVerse.ref)) {
+            if (verses.length) { const sel = selectNextVerse(); currentVerse = sel.verse; currentDir = sel.dir; renderPrompt(); }
+            else currentVerse = null;
+          }
+        }
       }
     }
     // Drop stale history refs that don't exist in the current verse list
@@ -858,7 +885,7 @@ async function cloudSave() {
   setSyncStatus('syncing');
   try {
     const displayName = getLocalProfiles()[rawKey] || rawKey;
-    const payload = { displayName, history: toCloudHistoryList(history), verses: myVerses };
+    const payload = { displayName, history: toCloudHistoryList(history), verses: myVerses, versesUpdatedAt: getMyVersesUpdatedAt() };
     lastCloudProfiles = { ...(lastCloudProfiles || {}), [myKey]: payload };
     const r = await fetch(`${fbBase(cfg)}/profiles/${encodeURIComponent(myKey)}.json`, {
       method: 'PUT',
@@ -1179,7 +1206,17 @@ let myVerses  = [];   // [{ref, text}] — this profile's own verses (no built-i
 function loadMyVerses() {
   try { myVerses = JSON.parse(localStorage.getItem(profileVersesKey(getCurrentProfileKey())) || '[]'); } catch { myVerses = []; }
 }
-function saveMyVerses() { localStorage.setItem(profileVersesKey(getCurrentProfileKey()), JSON.stringify(myVerses)); }
+// Tracks when this profile's verse list last changed *on this device*, so cloudLoad()
+// can tell whether a cloud copy reflects edits/deletions made elsewhere (cloud is newer —
+// replace wholesale) or whether this device's copy already is the latest (keep local, just
+// fold in brand-new verses). Without this, cloudLoad() could only ever add verses, never
+// pick up a text/ref edit or a deletion made on another device.
+function profileVersesMetaKey(key) { return 'bibelvers-myverses-updated-v1:' + key; }
+function getMyVersesUpdatedAt() { return Number(localStorage.getItem(profileVersesMetaKey(getCurrentProfileKey()))) || 0; }
+function saveMyVerses(updatedAt) {
+  localStorage.setItem(profileVersesKey(getCurrentProfileKey()), JSON.stringify(myVerses));
+  localStorage.setItem(profileVersesMetaKey(getCurrentProfileKey()), String(updatedAt ?? Date.now()));
+}
 
 function rebuildVerses() {
   verses.length = 0;
@@ -1854,7 +1891,7 @@ function verseItemHTML(v) {
   const safeRef = v.ref.replace(/"/g, '&quot;');
   const safeText = v.text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
   return `<div class="edit-verse-item">
-    <div class="edit-verse-ref">${v.ref}</div>
+    <input class="edit-verse-ref-input" type="text" data-orig-ref="${safeRef}" value="${safeRef}" title="Referanse – kan endres uten å miste historikk">
     <textarea class="edit-verse-ta" data-ref="${safeRef}" rows="3">${safeText}</textarea>
     <div class="edit-verse-actions">
       <button class="btn-delete-verse" onclick="deleteVerse(this)" data-ref="${safeRef}">✕ Slett vers</button>
@@ -1998,23 +2035,54 @@ function deleteVerse(btn) {
   cloudSave().then(() => { setTimeout(() => { if (st.textContent === 'Vers slettet.') st.textContent = ''; }, 2000); });
 }
 
+// Renaming a verse's reference (e.g. expanding "Johannes 3:16" to "Johannes 3:16-17")
+// keeps its history intact by moving the history entry to the new key, rather than
+// treating it as delete-old/add-new the way removing and re-adding a verse would.
 function saveVerseEdits() {
-  let changed = false;
-  document.querySelectorAll('#edit-verse-list .edit-verse-ta').forEach(ta => {
-    const ref = ta.dataset.ref;
+  const st = document.getElementById('edit-status');
+  const items = [...document.querySelectorAll('#edit-verse-list .edit-verse-item')];
+  const rows = items.map(item => ({
+    refInput: item.querySelector('.edit-verse-ref-input'),
+    ta: item.querySelector('.edit-verse-ta'),
+  }));
+
+  const finalRefs = rows.map(r => r.refInput.value.trim());
+  if (finalRefs.some(r => !r)) {
+    st.textContent = 'Referanse kan ikke være tom.'; st.className = 'cfg-status error'; return;
+  }
+  const dupe = finalRefs.find((r, i) => finalRefs.indexOf(r) !== i);
+  if (dupe) {
+    st.textContent = `Flere vers kan ikke ha samme referanse («${dupe}»).`; st.className = 'cfg-status error'; return;
+  }
+
+  let changed = false, renamed = false;
+  const renameMap = new Map();   // old ref -> new ref, so a renamed on-screen verse isn't lost
+  for (const { refInput, ta } of rows) {
+    const oldRef = refInput.dataset.origRef;
+    const newRef = refInput.value.trim();
     const newText = ta.value.trim();
-    const v = myVerses.find(x => x.ref === ref);
-    if (v && newText && v.text !== newText) { v.text = newText; changed = true; }
-  });
-  if (changed) {
-    saveMyVerses();
-    rebuildVerses();
-    if (currentVerse) {
-      const updated = verses.find(v => v.ref === currentVerse.ref);
-      if (updated) currentVerse = updated;
+    const v = myVerses.find(x => x.ref === oldRef);
+    if (!v) continue;
+    if (newText && v.text !== newText) { v.text = newText; changed = true; }
+    if (newRef !== oldRef) {
+      v.ref = newRef;
+      if (history[oldRef]) { history[newRef] = history[oldRef]; delete history[oldRef]; }
+      renameMap.set(oldRef, newRef);
+      refInput.dataset.origRef = newRef;
+      changed = true; renamed = true;
     }
   }
-  const st = document.getElementById('edit-status');
+  if (changed) {
+    saveMyVerses();
+    if (renamed) saveHistory();
+    rebuildVerses();
+    if (currentVerse) {
+      const targetRef = renameMap.get(currentVerse.ref) || currentVerse.ref;
+      currentVerse = verses.find(v => v.ref === targetRef) || null;
+    }
+    updateProgress();
+    renderHistory(null);
+  }
   st.textContent = 'Lagret!'; st.className = 'cfg-status ok';
   cloudSave();
   closeEditModal();
@@ -2040,7 +2108,9 @@ document.getElementById('edit-modal').addEventListener('click',e=>{ if(e.target=
 document.getElementById('chart-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeChartModal(); });
 // Enable "Lagre endringer" only once a verse text is actually edited
 document.getElementById('edit-verse-list').addEventListener('input', e => {
-  if (e.target.classList.contains('edit-verse-ta')) document.getElementById('save-edits-btn').disabled = false;
+  if (e.target.classList.contains('edit-verse-ta') || e.target.classList.contains('edit-verse-ref-input')) {
+    document.getElementById('save-edits-btn').disabled = false;
+  }
 });
 // Auto-parse a YouVersion paste into the reference/text fields (silent if it doesn't match)
 document.getElementById('new-verse-paste').addEventListener('paste', () => setTimeout(() => parsePastedVerse(false), 0));
