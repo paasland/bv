@@ -2348,12 +2348,12 @@ function closeChartModal() { document.getElementById('chart-modal').classList.ad
 
 function verseColor(i, n) { return `hsl(${Math.round(i * 360 / Math.max(1, n))},70%,60%)`; }
 
-// One merged attempt series per verse (both retninger slått sammen), colour-coded.
+// One attempt series per verse, colour-coded. Same scope as the table below: referanse→tekst (r2t) attempts only.
 function collectVerseSeries() {
   const out = [];
   for (const ref of Object.keys(history)) {
-    let atts = [];
-    for (const dir of DIRS) { const e = history[ref]?.[dir]; if (e) atts = atts.concat(ensureAttempts(e)); }
+    const e = history[ref]?.r2t;
+    let atts = e ? ensureAttempts(e) : [];
     atts = atts.filter(a => a && typeof a.score === 'number').sort((a, b) => attemptTime(a) - attemptTime(b));
     if (atts.length) out.push({ ref, attempts: atts });
   }
@@ -2463,7 +2463,6 @@ const TBL_COLS = [
   { key:'rawHi',  label:'Rå høyeste',   type:'num'  },
   { key:'rawLo',  label:'Rå laveste',   type:'num'  },
   { key:'adjNew', label:'Just. nyeste', type:'num'  },
-  { key:'adjHi',  label:'Just. høyeste',type:'num'  },
   { key:'adjLo',  label:'Just. laveste',type:'num'  },
   { key:'redNew', label:'Red. nyeste',  type:'num'  },
   { key:'redHi',  label:'Red. høyeste', type:'num'  },
@@ -2479,7 +2478,7 @@ function openOverviewModal() {
   overviewMarked = null;
   tblSort = { key:'ref', dir:1 }; tblFilters = {}; tblFrom = null; tblTo = null;
   document.querySelector('#chart-modal .modal')?.classList.add('wide');
-  document.getElementById('chart-title').textContent = 'Historikk – alle vers';
+  document.getElementById('chart-title').textContent = 'Historikk – alle vers (referanse → tekst)';
   const body = document.getElementById('chart-body');
   if (!overviewSeries.length) {
     body.innerHTML = '<p class="chart-empty">Ingen data ennå.</p>';
@@ -2501,7 +2500,7 @@ function renderOverview() {
     <button type="button" class="ov-ctl" data-act="all">Vis alle</button>
     <button type="button" class="ov-ctl" data-act="none">Skjul alle</button>
   </div>`;
-  const caption = '<div class="overview-caption">Klikk på et vers for å vise/skjule linjen, eller klikk på en graf-linje for å markere verset her. Begge retninger (📖/🔖) er slått sammen per vers.</div>';
+  const caption = '<div class="overview-caption">Klikk på et vers for å vise/skjule linjen, eller klikk på en graf-linje for å markere verset her. Kun retningen referanse → tekst (📖) vises – ikke tekst → referanse (🔖).</div>';
   const visible = overviewSeries.filter(s => !overviewHidden.has(s.ref));
   const charts = visible.length
     ? buildOverviewSVG(visible, 'raw', 'Score (rå)')
@@ -2550,7 +2549,7 @@ function computeTableRows() {
       if (tblTo   != null && t > tblTo)   return false;
       return true;
     }).sort((a, b) => attemptTime(a) - attemptTime(b));
-    if (!atts.length) return { ref, rawNew:null,rawHi:null,rawLo:null,adjNew:null,adjHi:null,adjLo:null,redNew:null,redHi:null,redLo:null };
+    if (!atts.length) return { ref, rawNew:null,rawHi:null,rawLo:null,adjNew:null,adjLo:null,redNew:null,redHi:null,redLo:null };
     const newest = atts[atts.length - 1];
     const raws = atts.map(a => a.score);
     const adjs = atts.map(a => getAdjustedScore(a));
@@ -2558,7 +2557,7 @@ function computeTableRows() {
     return {
       ref,
       rawNew: newest.score,             rawHi: Math.max(...raws), rawLo: Math.min(...raws),
-      adjNew: getAdjustedScore(newest), adjHi: Math.max(...adjs), adjLo: Math.min(...adjs),
+      adjNew: getAdjustedScore(newest), adjLo: Math.min(...adjs),
       redNew: newest.reduction ?? 1,    redHi: Math.max(...reds), redLo: Math.min(...reds),
     };
   });
@@ -2603,7 +2602,7 @@ function renderOverviewTable() {
     ? rows.map(r => `<tr>
         <td class="tbl-ref">${r.ref}</td>
         <td>${cell(r.rawNew)}</td><td>${cell(r.rawHi)}</td><td>${cell(r.rawLo)}</td>
-        <td>${cell(r.adjNew)}</td><td>${cell(r.adjHi)}</td><td>${cell(r.adjLo)}</td>
+        <td>${cell(r.adjNew)}</td><td>${cell(r.adjLo)}</td>
         <td>${cell(r.redNew,true)}</td><td>${cell(r.redHi,true)}</td><td>${cell(r.redLo,true)}</td>
       </tr>`).join('')
     : `<tr><td class="tbl-empty" colspan="${TBL_COLS.length}">Ingen rader matcher filteret.</td></tr>`;
