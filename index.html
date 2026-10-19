@@ -331,6 +331,7 @@
     .overview-chart { margin-bottom:22px; }
     .overview-chart-title { font-family:system-ui; font-size:.8rem; color:var(--text); font-weight:600; margin-bottom:4px; }
     .overview-caption { font-family:system-ui; font-size:.68rem; color:var(--muted); margin-bottom:14px; }
+    .pred-stats { font-family:system-ui; font-size:.68rem; color:var(--muted); margin-bottom:4px; }
 
     /* ── HISTORY REDUCTION ── */
     .history-item { cursor:pointer; }
@@ -599,6 +600,7 @@
     <aside class="history-panel">
       <div class="history-header">
         <div class="h-title clickable" onclick="openOverviewModal()" title="Vis grafer for alle vers">Historikk 📊</div>
+        <div class="h-title clickable" onclick="openPredictorModal()" title="Spredningsplott: hva forutsier lav score?">Prediktorer 🔍</div>
         <div class="history-legend">📖 Husk teksten · 🔖 Husk referansen · ⏱ tidsjustert score</div>
         <div class="history-total" id="history-total"></div>
       </div>
@@ -1809,8 +1811,8 @@ function record(score) {
       // 1–5 worse: unchanged
       newReduction = prevReduction;
     } else {
-      // More than 5 worse: increase by ((decrease-6)/4)+0.1, rounded to 1 decimal
-      const inc = Math.round((((decrease - 6) / 4) + 0.1) * 10) / 10;
+      // More than 5 worse: increase by ((decrease-6)/5)+0.1, rounded to 1 decimal
+      const inc = Math.round((((decrease - 6) / 5) + 0.1) * 10) / 10;
       newReduction = Math.round((prevReduction + inc) * 10) / 10;
     }
   }
@@ -2487,6 +2489,107 @@ function openOverviewModal() {
     renderOverview();
     renderOverviewTable();
   }
+  document.getElementById('chart-modal').classList.remove('hidden');
+}
+
+// ── PREDICTOR SCATTER PLOTS ──
+// One dot per attempt: y = score achieved, x = something known just *before* that attempt.
+
+const DAY_MS = 86400000;
+function dayStart(ms) { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
+
+// Same decay as getAdjustedScore(), but evaluated at an arbitrary moment instead of today.
+function adjustedAt(att, whenMs) {
+  const days = Math.round((dayStart(whenMs) - dayStart(attemptTime(att))) / DAY_MS);
+  return Math.max(0, att.score - days * (att.reduction ?? 1));
+}
+
+let predDir = 'r2t';
+
+function collectPredictorPoints() {
+  const P = { attempts: [], prevScore: [], gapDays: [], prevAdj: [], drop2: [] };
+  for (const ref of Object.keys(history)) {
+    for (const dir of (predDir === 'all' ? ['r2t', 't2r'] : [predDir])) {
+      const e = history[ref]?.[dir];
+      const atts = (e ? ensureAttempts(e) : []).filter(a => a && typeof a.score === 'number')
+                                              .sort((a, b) => attemptTime(a) - attemptTime(b));
+      atts.forEach((a, i) => {
+        const y = a.score, t = attemptTime(a), tag = `${ref} (forsøk ${i+1}, ${fmtDateShort(t)})`;
+        const add = (k, x) => P[k].push({ x, y, tag });
+        add('attempts', i);
+        if (i >= 1) {
+          const p = atts[i-1];
+          add('prevScore', p.score);
+          add('gapDays', Math.round((dayStart(t) - dayStart(attemptTime(p))) / DAY_MS));
+          add('prevAdj', adjustedAt(p, t));
+        }
+        if (i >= 2) add('drop2', atts[i-2].score - atts[i-1].score);
+      });
+    }
+  }
+  return P;
+}
+
+function buildScatterSVG(pts, title, xLabel) {
+  if (!pts.length) return `<div class="overview-chart"><div class="overview-chart-title">${title}</div><p class="chart-empty">Ingen data.</p></div>`;
+  const n = pts.length;
+  const mx = pts.reduce((s, p) => s + p.x, 0) / n, my = pts.reduce((s, p) => s + p.y, 0) / n;
+  let sxx = 0, syy = 0, sxy = 0;
+  for (const p of pts) { sxx += (p.x-mx)**2; syy += (p.y-my)**2; sxy += (p.x-mx)*(p.y-my); }
+  const r = sxx && syy ? sxy / Math.sqrt(sxx * syy) : null;
+  const slope = sxx ? sxy / sxx : null, icpt = my - (slope ?? 0) * mx;
+
+  let xMin = Math.min(...pts.map(p => p.x)), xMax = Math.max(...pts.map(p => p.x));
+  if (xMax === xMin) { xMin -= 1; xMax += 1; }
+  const xp = (xMax - xMin) * 0.05; xMin -= xp; xMax += xp;
+
+  const W = 600, H = 260, mL = 40, mR = 14, mT = 14, mB = 38;
+  const plotW = W - mL - mR, plotH = H - mT - mB;
+  const X = v => mL + (v - xMin) / (xMax - xMin) * plotW;
+  const Y = v => mT + (1 - Math.max(0, Math.min(100, v)) / 100) * plotH;
+
+  let grid = '';
+  for (const v of [0, 25, 50, 75, 100]) {
+    grid += `<line x1="${mL}" y1="${Y(v).toFixed(1)}" x2="${mL+plotW}" y2="${Y(v).toFixed(1)}" stroke="rgba(255,255,255,.07)"/>`;
+    grid += `<text x="${mL-5}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end" class="ax">${v}</text>`;
+  }
+  const xStep = niceStep(xMax - xMin, [1, 2, 5, 10, 20, 25, 50, 100, 200]);
+  for (let v = Math.ceil(xMin / xStep) * xStep; v <= xMax; v += xStep) {
+    grid += `<text x="${X(v).toFixed(1)}" y="${mT+plotH+15}" text-anchor="middle" class="ax">${Math.round(v*10)/10}</text>`;
+  }
+  const dots = pts.map(p =>
+    `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3" fill="#5ea0e0" fill-opacity=".45"><title>${esc(p.tag)}: x=${Math.round(p.x*10)/10}, score=${p.y}</title></circle>`).join('');
+  const fit = slope === null ? '' :
+    `<line x1="${X(xMin).toFixed(1)}" y1="${Y(icpt + slope*xMin).toFixed(1)}" x2="${X(xMax).toFixed(1)}" y2="${Y(icpt + slope*xMax).toFixed(1)}" stroke="#e6b84a" stroke-width="1.5" stroke-dasharray="5 3"/>`;
+  const stats = `n = ${n} · korrelasjon r = ${r === null ? '–' : r.toFixed(2)}` +
+    (slope === null ? '' : ` · trend: score ≈ ${icpt.toFixed(1)} ${slope < 0 ? '−' : '+'} ${Math.abs(slope).toFixed(2)}·x`);
+  return `<div class="overview-chart"><div class="overview-chart-title">${title}</div>
+    <div class="pred-stats">${stats}</div>
+    <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">${grid}${fit}${dots}
+      <text x="${mL+plotW/2}" y="${H-4}" text-anchor="middle" class="ax-title">${xLabel}</text>
+      <text class="ax-title" transform="translate(11,${mT+plotH/2}) rotate(-90)" text-anchor="middle">Score %</text></svg></div>`;
+}
+
+function renderPredictors() {
+  const P = collectPredictorPoints();
+  const sel = `<div class="overview-controls"><label style="font-family:system-ui;font-size:.75rem;color:var(--muted)">Retning
+    <select onchange="predDir=this.value;renderPredictors()">
+      <option value="r2t"${predDir==='r2t'?' selected':''}>📖 referanse → tekst</option>
+      <option value="t2r"${predDir==='t2r'?' selected':''}>🔖 tekst → referanse</option>
+      <option value="all"${predDir==='all'?' selected':''}>Begge</option></select></label></div>`;
+  const caption = '<div class="overview-caption">Hver prikk er ett forsøk. Y = oppnådd score. Stiplet linje = lineær trend. Første forsøk for hvert vers har ingen «forrige» verdi og utelates fra plott 2–5.</div>';
+  document.getElementById('chart-body').innerHTML = sel + caption +
+    buildScatterSVG(P.attempts,  '1. Antall forsøk før dette forsøket', 'Antall tidligere forsøk') +
+    buildScatterSVG(P.prevScore, '2. Forrige forsøks score', 'Score på forrige forsøk (%)') +
+    buildScatterSVG(P.gapDays,   '3. Tid siden forrige forsøk', 'Dager siden forrige forsøk') +
+    buildScatterSVG(P.prevAdj,   '4. Tidsjustert score (forrige forsøk, målt ved dette forsøket)', 'Tidsjustert score rett før forsøket (%)') +
+    buildScatterSVG(P.drop2,     '5. Reduksjon i score: 2 forsøk siden → forrige forsøk', 'Score(n−2) − Score(n−1)  (positiv = falt)');
+}
+
+function openPredictorModal() {
+  document.querySelector('#chart-modal .modal')?.classList.add('wide');
+  document.getElementById('chart-title').textContent = 'Prediktorer for lav score';
+  renderPredictors();
   document.getElementById('chart-modal').classList.remove('hidden');
 }
 
