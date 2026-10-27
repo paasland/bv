@@ -601,7 +601,7 @@
       <div class="history-header">
         <div class="h-title clickable" onclick="openOverviewModal()" title="Vis grafer for alle vers">Historikk 📊</div>
         <div class="h-title clickable" onclick="openPredictorModal()" title="Spredningsplott: hva forutsier lav score?">Prediktorer 🔍</div>
-        <div class="history-legend">📖 Husk teksten · 🔖 Husk referansen · ⏱ tidsjustert score</div>
+        <div class="history-legend">📖 Husk teksten · 🔖 Husk referansen · ⏱ antall- og tidsjustert score</div>
         <div class="history-total" id="history-total"></div>
       </div>
       <div class="history-list" id="history-list">
@@ -1111,6 +1111,32 @@ function getAdjustedScore(entry) {
   return Math.max(0, Math.round((entry.score - days * reduction) * 10) / 10);
 }
 
+// Count-and-time-adjusted score: score − days × rate, where the rate falls with the number of
+// tests n: (14 − n) up to n = 13 (rate 1), then 1 − 0.1·(n − 13), never below 0.
+// getAdjustedScore() above is kept as-is but is no longer shown or used for selection.
+function countRate(n) {
+  if (n <= 13) return 14 - n;
+  return Math.max(0, 1 - 0.1 * (n - 13));
+}
+function getCountAdjustedScore(entry) {
+  if (!entry?.score) return 0;
+  let submitted;
+  if (entry.date) {
+    const [d, m, y] = entry.date.split('.').map(Number);
+    submitted = new Date(y, m - 1, d);
+  } else if (entry.timestamp) {
+    const t = new Date(entry.timestamp);
+    submitted = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  } else {
+    return entry.score;
+  }
+  const today = new Date();
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const days = Math.round((todayMidnight - submitted) / 86400000);
+  const n = Math.max(1, ensureAttempts(entry).length);
+  return Math.max(0, Math.round((entry.score - days * countRate(n)) * 10) / 10);
+}
+
 // ── ATTEMPT SERIES (chart data) ──
 
 function attemptTime(a) {
@@ -1261,7 +1287,7 @@ const DIR_META = {
          correctLabel:'Riktig referanse', dirLabel:'🔖 Tekst → referanse', isText:true }
 };
 
-function adjFor(ref, dir)   { return getAdjustedScore(history[ref]?.[dir]); }
+function adjFor(ref, dir)   { return getCountAdjustedScore(history[ref]?.[dir]); }
 function verseMinAdj(ref)   { return Math.min(adjFor(ref, 'r2t'), adjFor(ref, 't2r')); }
 
 // For a verse range you only need to recall the start, e.g.
@@ -1580,7 +1606,7 @@ function updatePrevScore() {
   const el = document.getElementById('prev-score');
   const entry = history[currentVerse?.ref]?.[currentDir];
   if (!entry) { el.classList.add('hidden'); return; }
-  const adj = getAdjustedScore(entry);
+  const adj = getCountAdjustedScore(entry);
   document.getElementById('prev-adj').textContent  = '⏱ ' + fmtScore(adj);
   document.getElementById('prev-orig').textContent = '(' + entry.score + '%)';
   el.classList.remove('hidden');
@@ -1724,15 +1750,15 @@ function updateProgress() {
 function dirCellHTML(ref, dir, sRef) {
   const meta  = DIR_META[dir];
   const entry = history[ref]?.[dir];
-  const adj   = getAdjustedScore(entry);
+  const adj   = getCountAdjustedScore(entry);
   const raw   = entry ? entry.score : 0;
-  const red   = entry?.reduction ?? 1;
+  const red   = countRate(Math.max(1, ensureAttempts(entry).length));
   const date  = entry ? entry.date : '–';
   const clickable = entry ? ' clickable' : '';
   const tip = entry ? 'Klikk for å se utvikling over tid' : 'Ikke testet ennå (teller som 0 %)';
   return `<div class="h-dir${clickable}" data-ref="${sRef}" data-dir="${dir}" title="${tip}">
     <div class="h-dir-icon" title="${meta.dirLabel}">${meta.icon}</div>
-    <div class="h-score ${scoreClass(adj)}" title="Tidsjustert score (−${red} per dag)">⏱ ${fmtScore(adj)}</div>
+    <div class="h-score ${scoreClass(adj)}" title="Antall- og tidsjustert score (−${Math.round(red*10)/10} per dag)">⏱ ${fmtScore(adj)}</div>
     <div class="h-score-adj ${scoreClass(raw)}" title="Siste faktiske score">${raw}%</div>
     <div class="h-dir-date">${date}</div>
   </div>`;
