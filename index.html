@@ -2174,6 +2174,7 @@ function fmtDateShort(ms) {
 
 // Renders three series over time as inline SVG:
 //   line 1 – time-adjusted score (decays per day, jumps back up at each attempt)
+//   line 1b – count-and-time-adjusted score (decay rate falls with number of tests)
 //   line 2 – raw score at each attempt          (shares the left 0–100 axis)
 //   line 3 – reduction factor per day           (right axis, step function)
 function buildChartSVG(ref, dir) {
@@ -2198,9 +2199,9 @@ function buildChartSVG(ref, dir) {
   const X  = t => mL + (t - xMin) / (xMax - xMin) * plotW;
   const Ys = v => mT + (1 - Math.max(0,Math.min(100,v))/100) * plotH;     // score axis (left)
   const Yr = v => mT + (1 - Math.max(0,Math.min(redMax,v))/redMax) * plotH; // reduction axis (right)
-  const C = { adj:'#e6b84a', raw:'#5ea0e0', red:'#e05252' };
+  const C = { adj:'#e6b84a', cnt:'#6fcf97', raw:'#5ea0e0', red:'#e05252' };
 
-  const adjPts=[], rawPts=[], redPts=[];
+  const adjPts=[], cntPts=[], rawPts=[], redPts=[];
   for (let i=0;i<attempts.length;i++) {
     const t = attemptTime(attempts[i]);
     const s = attempts[i].score;
@@ -2213,6 +2214,14 @@ function buildChartSVG(ref, dir) {
       if (zeroT < segEnd) { adjPts.push([zeroT, 0]); adjPts.push([segEnd, 0]); }
       else adjPts.push([segEnd, s - ((segEnd - t) / DAY) * r]);
     } else adjPts.push([segEnd, s]);
+    // count-and-time-adjusted: same decay, but the rate depends on the number of tests so far
+    const cr = countRate(i + 1);
+    cntPts.push([t, s]);
+    if (cr > 0) {
+      const zeroT = t + (s / cr) * DAY;
+      if (zeroT < segEnd) { cntPts.push([zeroT, 0]); cntPts.push([segEnd, 0]); }
+      else cntPts.push([segEnd, s - ((segEnd - t) / DAY) * cr]);
+    } else cntPts.push([segEnd, s]);
     // raw score: one point per attempt
     rawPts.push([t, s]);
     // reduction: step held until the next attempt
@@ -2265,11 +2274,13 @@ function buildChartSVG(ref, dir) {
       <circle class="chart-hover-dot" data-series="raw" r="4" fill="${C.raw}"/>
       <circle class="chart-hover-dot" data-series="red" r="4" fill="${C.red}"/>
       <circle class="chart-hover-dot" data-series="adj" r="4" fill="${C.adj}"/>
+      <circle class="chart-hover-dot" data-series="cnt" r="4" fill="${C.cnt}"/>
     </g>
     <rect class="chart-hover-capture" x="${mL}" y="${mT}" width="${plotW}" height="${plotH}" fill="transparent" pointer-events="all"/>`;
 
   const html = `<div class="chart-legend">
       <span><i style="background:${C.adj}"></i>Tidsjustert score</span>
+      <span><i style="background:${C.cnt}"></i>Antall- og tidsjustert score</span>
       <span><i style="background:${C.raw}"></i>Score (rå)</span>
       <span><i style="background:${C.red}"></i>Reduksjon/dag</span>
     </div>
@@ -2279,13 +2290,14 @@ function buildChartSVG(ref, dir) {
         ${poly(redPts, Yr, C.red, 1.5)}
         ${poly(rawPts, Ys, C.raw, 2)}
         ${poly(adjPts, Ys, C.adj, 2)}
+        ${poly(cntPts, Ys, C.cnt, 2)}
         ${redAxis}${titles}${marks}${hover}
       </svg>
       <div class="chart-hover-tip"></div>
     </div>
     <div class="chart-meta">${attempts.length} forsøk · beveg musen over grafen for verdier på en vilkårlig dag</div>`;
 
-  return { html, hoverData: { W, H, mL, mT, plotW, plotH, xMin, xMax, X, Ys, Yr, adjPts, rawPts, redPts } };
+  return { html, hoverData: { W, H, mL, mT, plotW, plotH, xMin, xMax, X, Ys, Yr, adjPts, cntPts, rawPts, redPts } };
 }
 
 // Linear-interpolates a piecewise series (sorted ascending by time) at time t,
@@ -2312,6 +2324,7 @@ function wireChartHover(root, hoverData) {
   const dotRaw = hoverG.querySelector('.chart-hover-dot[data-series="raw"]');
   const dotRed = hoverG.querySelector('.chart-hover-dot[data-series="red"]');
   const dotAdj = hoverG.querySelector('.chart-hover-dot[data-series="adj"]');
+  const dotCnt = hoverG.querySelector('.chart-hover-dot[data-series="cnt"]');
   const d = hoverData;
 
   function update(clientX) {
@@ -2320,6 +2333,7 @@ function wireChartHover(root, hoverData) {
     const xSvg = (clientX - rect.left) * (d.W / rect.width);
     const t = Math.max(d.xMin, Math.min(d.xMax, d.xMin + (xSvg - d.mL) / d.plotW * (d.xMax - d.xMin)));
     const adjV = chartValueAt(d.adjPts, t);
+    const cntV = chartValueAt(d.cntPts, t);
     const rawV = chartValueAt(d.rawPts, t);
     const redV = chartValueAt(d.redPts, t);
     const x = d.X(t);
@@ -2327,8 +2341,10 @@ function wireChartHover(root, hoverData) {
     dotRaw.setAttribute('cx', x.toFixed(1)); dotRaw.setAttribute('cy', d.Ys(rawV).toFixed(1));
     dotRed.setAttribute('cx', x.toFixed(1)); dotRed.setAttribute('cy', d.Yr(redV).toFixed(1));
     dotAdj.setAttribute('cx', x.toFixed(1)); dotAdj.setAttribute('cy', d.Ys(adjV).toFixed(1));
+    dotCnt.setAttribute('cx', x.toFixed(1)); dotCnt.setAttribute('cy', d.Ys(cntV).toFixed(1));
     hoverG.style.display = '';
     tip.innerHTML = `<b>${fmtDateShort(t)}</b><br>Tidsjustert: ${fmtScore(Math.max(0,Math.round(adjV*10)/10))}<br>`
+      + `Antall+tid: ${fmtScore(Math.max(0,Math.round(cntV*10)/10))}<br>`
       + `Rå score: ${Math.round(rawV)}%<br>Reduksjon: ${(Math.round(redV*10)/10)}/dag`;
     const wrapRect = wrap.getBoundingClientRect();
     const tipHalf = tip.offsetWidth / 2;
