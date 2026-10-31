@@ -1112,11 +1112,11 @@ function getAdjustedScore(entry) {
 }
 
 // Count-and-time-adjusted score: score − days × rate, where the rate falls with the number of
-// tests n: (14 − n) up to n = 13 (rate 1), then 1 − 0.1·(n − 13), never below 0.
+// tests n: 7.5 − 0.5·n up to n = 13 (rate 1), then 10 % lower per extra test: 0.9^(n − 13).
 // getAdjustedScore() above is kept as-is but is no longer shown or used for selection.
 function countRate(n) {
-  if (n <= 13) return 14 - n;
-  return Math.max(0, 1 - 0.1 * (n - 13));
+  if (n <= 13) return 7.5 - 0.5 * n;
+  return Math.pow(0.9, n - 13);
 }
 function getCountAdjustedScore(entry) {
   if (!entry?.score) return 0;
@@ -2546,10 +2546,16 @@ function adjustedAt(att, whenMs) {
   return Math.max(0, att.score - days * (att.reduction ?? 1));
 }
 
+// Count-and-time-adjusted counterpart: rate depends on n, the number of tests done up to and including att.
+function countAdjustedAt(att, n, whenMs) {
+  const days = Math.round((dayStart(whenMs) - dayStart(attemptTime(att))) / DAY_MS);
+  return Math.max(0, att.score - days * countRate(n));
+}
+
 let predDir = 'r2t';
 
 function collectPredictorPoints() {
-  const P = { attempts: [], prevScore: [], gapDays: [], prevAdj: [], drop2: [] };
+  const P = { attempts: [], prevScore: [], gapDays: [], prevAdj: [], prevCnt: [], sumRaw: [], drop2: [] };
   for (const ref of Object.keys(history)) {
     for (const dir of (predDir === 'all' ? ['r2t', 't2r'] : [predDir])) {
       const e = history[ref]?.[dir];
@@ -2564,6 +2570,8 @@ function collectPredictorPoints() {
           add('prevScore', p.score);
           add('gapDays', Math.round((dayStart(t) - dayStart(attemptTime(p))) / DAY_MS));
           add('prevAdj', adjustedAt(p, t));
+          add('prevCnt', countAdjustedAt(p, i, t));
+          add('sumRaw', atts.slice(0, i).reduce((s, q) => s + q.score, 0));
         }
         if (i >= 2) add('drop2', atts[i-2].score - atts[i-1].score);
       });
@@ -2619,13 +2627,15 @@ function renderPredictors() {
       <option value="r2t"${predDir==='r2t'?' selected':''}>📖 referanse → tekst</option>
       <option value="t2r"${predDir==='t2r'?' selected':''}>🔖 tekst → referanse</option>
       <option value="all"${predDir==='all'?' selected':''}>Begge</option></select></label></div>`;
-  const caption = '<div class="overview-caption">Hver prikk er ett forsøk. Y = oppnådd score. Stiplet linje = lineær trend. Første forsøk for hvert vers har ingen «forrige» verdi og utelates fra plott 2–5.</div>';
+  const caption = '<div class="overview-caption">Hver prikk er ett forsøk. Y = oppnådd score. Stiplet linje = lineær trend. Første forsøk for hvert vers har ingen «forrige» verdi og utelates fra plott 2–7.</div>';
   document.getElementById('chart-body').innerHTML = sel + caption +
     buildScatterSVG(P.attempts,  '1. Antall forsøk før dette forsøket', 'Antall tidligere forsøk') +
     buildScatterSVG(P.prevScore, '2. Forrige forsøks score', 'Score på forrige forsøk (%)') +
     buildScatterSVG(P.gapDays,   '3. Tid siden forrige forsøk', 'Dager siden forrige forsøk') +
     buildScatterSVG(P.prevAdj,   '4. Tidsjustert score (forrige forsøk, målt ved dette forsøket)', 'Tidsjustert score rett før forsøket (%)') +
-    buildScatterSVG(P.drop2,     '5. Reduksjon i score: 2 forsøk siden → forrige forsøk', 'Score(n−2) − Score(n−1)  (positiv = falt)');
+    buildScatterSVG(P.drop2,     '5. Reduksjon i score: 2 forsøk siden → forrige forsøk', 'Score(n−2) − Score(n−1)  (positiv = falt)') +
+    buildScatterSVG(P.prevCnt,   '6. Antall- og tidsjustert score (forrige forsøk, målt ved dette forsøket)', 'Antall- og tidsjustert score rett før forsøket (%)') +
+    buildScatterSVG(P.sumRaw,    '7. Sum av rå score for alle tidligere forsøk', 'Sum av rå score for tidligere forsøk (%-poeng)');
 }
 
 function openPredictorModal() {
