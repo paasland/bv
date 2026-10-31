@@ -601,7 +601,7 @@
       <div class="history-header">
         <div class="h-title clickable" onclick="openOverviewModal()" title="Vis grafer for alle vers">Historikk 📊</div>
         <div class="h-title clickable" onclick="openPredictorModal()" title="Spredningsplott: hva forutsier lav score?">Prediktorer 🔍</div>
-        <div class="history-legend">📖 Husk teksten · 🔖 Husk referansen · ⏱ antall- og tidsjustert score</div>
+        <div class="history-legend">📖 Husk teksten · 🔖 Husk referansen · ⏱ kompleks-justert score</div>
         <div class="history-total" id="history-total"></div>
       </div>
       <div class="history-list" id="history-list">
@@ -1137,6 +1137,28 @@ function getCountAdjustedScore(entry) {
   return Math.max(0, Math.round((entry.score - days * countRate(n)) * 10) / 10);
 }
 
+const DAY_MS = 86400000;
+function dayStart(ms) { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
+
+// Complex-adjusted score: (sum of raw scores of all tests) − (days since latest test)
+// + (number of tests) + (raw score of latest test), never below 0. Not a percentage.
+// This is the score shown and used for picking the next verse.
+function complexScoreOf(atts, whenMs) {
+  if (!atts.length) return 0;
+  const last = atts[atts.length - 1];
+  const sum = atts.reduce((s, a) => s + a.score, 0);
+  const days = Math.max(0, Math.round((dayStart(whenMs) - dayStart(attemptTime(last))) / DAY_MS));
+  return Math.max(0, sum - days + atts.length + last.score);
+}
+function sortedAttempts(entry) {
+  return ensureAttempts(entry).filter(a => a && typeof a.score === 'number')
+                              .sort((a, b) => attemptTime(a) - attemptTime(b));
+}
+function getComplexScore(entry) {
+  return Math.round(complexScoreOf(sortedAttempts(entry), Date.now()) * 10) / 10;
+}
+function fmtComplex(s) { return s % 1 === 0 ? String(s) : s.toFixed(1); }
+
 // ── ATTEMPT SERIES (chart data) ──
 
 function attemptTime(a) {
@@ -1287,7 +1309,7 @@ const DIR_META = {
          correctLabel:'Riktig referanse', dirLabel:'🔖 Tekst → referanse', isText:true }
 };
 
-function adjFor(ref, dir)   { return getCountAdjustedScore(history[ref]?.[dir]); }
+function adjFor(ref, dir)   { return getComplexScore(history[ref]?.[dir]); }
 function verseMinAdj(ref)   { return Math.min(adjFor(ref, 'r2t'), adjFor(ref, 't2r')); }
 
 // For a verse range you only need to recall the start, e.g.
@@ -1606,8 +1628,8 @@ function updatePrevScore() {
   const el = document.getElementById('prev-score');
   const entry = history[currentVerse?.ref]?.[currentDir];
   if (!entry) { el.classList.add('hidden'); return; }
-  const adj = getCountAdjustedScore(entry);
-  document.getElementById('prev-adj').textContent  = '⏱ ' + fmtScore(adj);
+  const adj = getComplexScore(entry);
+  document.getElementById('prev-adj').textContent  = '⏱ ' + fmtComplex(adj);
   document.getElementById('prev-orig').textContent = '(' + entry.score + '%)';
   el.classList.remove('hidden');
 }
@@ -1750,15 +1772,14 @@ function updateProgress() {
 function dirCellHTML(ref, dir, sRef) {
   const meta  = DIR_META[dir];
   const entry = history[ref]?.[dir];
-  const adj   = getCountAdjustedScore(entry);
+  const adj   = getComplexScore(entry);
   const raw   = entry ? entry.score : 0;
-  const red   = countRate(Math.max(1, ensureAttempts(entry).length));
   const date  = entry ? entry.date : '–';
   const clickable = entry ? ' clickable' : '';
   const tip = entry ? 'Klikk for å se utvikling over tid' : 'Ikke testet ennå (teller som 0 %)';
   return `<div class="h-dir${clickable}" data-ref="${sRef}" data-dir="${dir}" title="${tip}">
     <div class="h-dir-icon" title="${meta.dirLabel}">${meta.icon}</div>
-    <div class="h-score ${scoreClass(adj)}" title="Antall- og tidsjustert score (−${Math.round(red*10)/10} per dag)">⏱ ${fmtScore(adj)}</div>
+    <div class="h-score ${scoreClass(raw)}" title="Kompleks-justert score (sum av alle scorer − dager + antall forsøk + siste score)">⏱ ${fmtComplex(adj)}</div>
     <div class="h-score-adj ${scoreClass(raw)}" title="Siste faktiske score">${raw}%</div>
     <div class="h-dir-date">${date}</div>
   </div>`;
@@ -2194,14 +2215,19 @@ function buildChartSVG(ref, dir) {
   let redMax = Math.ceil(Math.max(1, ...attempts.map(a => a.reduction ?? 1)) * 2) / 2;
   if (redMax < 1) redMax = 1;
 
-  const W=600, H=340, mL=46, mR=54, mT=30, mB=46;
+  const W=600, H=340, mL=46, mR=100, mT=30, mB=46;
   const plotW = W-mL-mR, plotH = H-mT-mB;
   const X  = t => mL + (t - xMin) / (xMax - xMin) * plotW;
   const Ys = v => mT + (1 - Math.max(0,Math.min(100,v))/100) * plotH;     // score axis (left)
   const Yr = v => mT + (1 - Math.max(0,Math.min(redMax,v))/redMax) * plotH; // reduction axis (right)
-  const C = { adj:'#e6b84a', cnt:'#6fcf97', raw:'#5ea0e0', red:'#e05252' };
+  const C = { adj:'#e6b84a', cnt:'#6fcf97', raw:'#5ea0e0', red:'#e05252', cpx:'#c792ea' };
 
-  const adjPts=[], cntPts=[], rawPts=[], redPts=[];
+  // complex-adjusted score: value right after attempt i, then −1 per day until the next attempt
+  const cpxStart = attempts.map((_, i) => complexScoreOf(attempts.slice(0, i + 1), attemptTime(attempts[i])));
+  const cpxMax = Math.max(100, Math.ceil(Math.max(...cpxStart) / 50) * 50);
+  const Yc = v => mT + (1 - Math.max(0,Math.min(cpxMax,v))/cpxMax) * plotH;  // complex axis (far right)
+
+  const adjPts=[], cntPts=[], rawPts=[], redPts=[], cpxPts=[];
   for (let i=0;i<attempts.length;i++) {
     const t = attemptTime(attempts[i]);
     const s = attempts[i].score;
@@ -2222,6 +2248,12 @@ function buildChartSVG(ref, dir) {
       if (zeroT < segEnd) { cntPts.push([zeroT, 0]); cntPts.push([segEnd, 0]); }
       else cntPts.push([segEnd, s - ((segEnd - t) / DAY) * cr]);
     } else cntPts.push([segEnd, s]);
+    // complex-adjusted: starts at cpxStart[i], loses 1 per day, clamped at 0
+    const cv = cpxStart[i];
+    cpxPts.push([t, cv]);
+    const cZero = t + cv * DAY;
+    if (cZero < segEnd) { cpxPts.push([cZero, 0]); cpxPts.push([segEnd, 0]); }
+    else cpxPts.push([segEnd, cv - ((segEnd - t) / DAY)]);
     // raw score: one point per attempt
     rawPts.push([t, s]);
     // reduction: step held until the next attempt
@@ -2244,6 +2276,12 @@ function buildChartSVG(ref, dir) {
     redAxis += `<text x="${mL+plotW+8}" y="${(y+3).toFixed(1)}" text-anchor="start" class="ax red">${v % 1 === 0 ? v : v.toFixed(1)}</text>`;
   }
 
+  let cpxAxis='';
+  for (let k=0;k<=4;k++) {
+    const v = cpxMax*k/4, y = Yc(v);
+    cpxAxis += `<text x="${mL+plotW+50}" y="${(y+3).toFixed(1)}" text-anchor="start" class="ax" style="fill:${C.cpx}">${Math.round(v)}</text>`;
+  }
+
   let xAxis='';
   for (let k=0;k<=4;k++) {
     const t = xMin + (xMax-xMin)*k/4, x = X(t);
@@ -2264,7 +2302,8 @@ function buildChartSVG(ref, dir) {
 
   const titles =
     `<text class="ax-title" transform="translate(13,${mT+plotH/2}) rotate(-90)" text-anchor="middle">Score %</text>` +
-    `<text class="ax-title red" transform="translate(${W-13},${mT+plotH/2}) rotate(90)" text-anchor="middle">Reduksjon / dag</text>`;
+    `<text class="ax-title red" transform="translate(${mL+plotW+36},${mT+plotH/2}) rotate(90)" text-anchor="middle">Reduksjon / dag</text>` +
+    `<text class="ax-title" style="fill:${C.cpx}" transform="translate(${W-13},${mT+plotH/2}) rotate(90)" text-anchor="middle">Kompleks score</text>`;
 
   // Crosshair + dots the hover handler moves along the lines; capture rect sits on top
   // so mousemove works anywhere over the plot, not just directly on a data point.
@@ -2275,12 +2314,14 @@ function buildChartSVG(ref, dir) {
       <circle class="chart-hover-dot" data-series="red" r="4" fill="${C.red}"/>
       <circle class="chart-hover-dot" data-series="adj" r="4" fill="${C.adj}"/>
       <circle class="chart-hover-dot" data-series="cnt" r="4" fill="${C.cnt}"/>
+      <circle class="chart-hover-dot" data-series="cpx" r="4" fill="${C.cpx}"/>
     </g>
     <rect class="chart-hover-capture" x="${mL}" y="${mT}" width="${plotW}" height="${plotH}" fill="transparent" pointer-events="all"/>`;
 
   const html = `<div class="chart-legend">
       <span><i style="background:${C.adj}"></i>Tidsjustert score</span>
       <span><i style="background:${C.cnt}"></i>Antall- og tidsjustert score</span>
+      <span><i style="background:${C.cpx}"></i>Kompleks-justert score</span>
       <span><i style="background:${C.raw}"></i>Score (rå)</span>
       <span><i style="background:${C.red}"></i>Reduksjon/dag</span>
     </div>
@@ -2291,13 +2332,14 @@ function buildChartSVG(ref, dir) {
         ${poly(rawPts, Ys, C.raw, 2)}
         ${poly(adjPts, Ys, C.adj, 2)}
         ${poly(cntPts, Ys, C.cnt, 2)}
-        ${redAxis}${titles}${marks}${hover}
+        ${poly(cpxPts, Yc, C.cpx, 2.5)}
+        ${redAxis}${cpxAxis}${titles}${marks}${hover}
       </svg>
       <div class="chart-hover-tip"></div>
     </div>
     <div class="chart-meta">${attempts.length} forsøk · beveg musen over grafen for verdier på en vilkårlig dag</div>`;
 
-  return { html, hoverData: { W, H, mL, mT, plotW, plotH, xMin, xMax, X, Ys, Yr, adjPts, cntPts, rawPts, redPts } };
+  return { html, hoverData: { W, H, mL, mT, plotW, plotH, xMin, xMax, X, Ys, Yr, Yc, adjPts, cntPts, cpxPts, rawPts, redPts } };
 }
 
 // Linear-interpolates a piecewise series (sorted ascending by time) at time t,
@@ -2325,6 +2367,7 @@ function wireChartHover(root, hoverData) {
   const dotRed = hoverG.querySelector('.chart-hover-dot[data-series="red"]');
   const dotAdj = hoverG.querySelector('.chart-hover-dot[data-series="adj"]');
   const dotCnt = hoverG.querySelector('.chart-hover-dot[data-series="cnt"]');
+  const dotCpx = hoverG.querySelector('.chart-hover-dot[data-series="cpx"]');
   const d = hoverData;
 
   function update(clientX) {
@@ -2334,6 +2377,7 @@ function wireChartHover(root, hoverData) {
     const t = Math.max(d.xMin, Math.min(d.xMax, d.xMin + (xSvg - d.mL) / d.plotW * (d.xMax - d.xMin)));
     const adjV = chartValueAt(d.adjPts, t);
     const cntV = chartValueAt(d.cntPts, t);
+    const cpxV = chartValueAt(d.cpxPts, t);
     const rawV = chartValueAt(d.rawPts, t);
     const redV = chartValueAt(d.redPts, t);
     const x = d.X(t);
@@ -2342,9 +2386,11 @@ function wireChartHover(root, hoverData) {
     dotRed.setAttribute('cx', x.toFixed(1)); dotRed.setAttribute('cy', d.Yr(redV).toFixed(1));
     dotAdj.setAttribute('cx', x.toFixed(1)); dotAdj.setAttribute('cy', d.Ys(adjV).toFixed(1));
     dotCnt.setAttribute('cx', x.toFixed(1)); dotCnt.setAttribute('cy', d.Ys(cntV).toFixed(1));
+    dotCpx.setAttribute('cx', x.toFixed(1)); dotCpx.setAttribute('cy', d.Yc(cpxV).toFixed(1));
     hoverG.style.display = '';
     tip.innerHTML = `<b>${fmtDateShort(t)}</b><br>Tidsjustert: ${fmtScore(Math.max(0,Math.round(adjV*10)/10))}<br>`
       + `Antall+tid: ${fmtScore(Math.max(0,Math.round(cntV*10)/10))}<br>`
+      + `Kompleks: ${fmtComplex(Math.max(0,Math.round(cpxV*10)/10))}<br>`
       + `Rå score: ${Math.round(rawV)}%<br>Reduksjon: ${(Math.round(redV*10)/10)}/dag`;
     const wrapRect = wrap.getBoundingClientRect();
     const tipHalf = tip.offsetWidth / 2;
@@ -2537,8 +2583,6 @@ function openOverviewModal() {
 // ── PREDICTOR SCATTER PLOTS ──
 // One dot per attempt: y = score achieved, x = something known just *before* that attempt.
 
-const DAY_MS = 86400000;
-function dayStart(ms) { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
 
 // Same decay as getAdjustedScore(), but evaluated at an arbitrary moment instead of today.
 function adjustedAt(att, whenMs) {
@@ -2555,7 +2599,7 @@ function countAdjustedAt(att, n, whenMs) {
 let predDir = 'r2t';
 
 function collectPredictorPoints() {
-  const P = { attempts: [], prevScore: [], gapDays: [], prevAdj: [], prevCnt: [], sumRaw: [], drop2: [] };
+  const P = { attempts: [], prevScore: [], gapDays: [], prevAdj: [], prevCnt: [], sumRaw: [], prevCpx: [], drop2: [] };
   for (const ref of Object.keys(history)) {
     for (const dir of (predDir === 'all' ? ['r2t', 't2r'] : [predDir])) {
       const e = history[ref]?.[dir];
@@ -2571,6 +2615,7 @@ function collectPredictorPoints() {
           add('gapDays', Math.round((dayStart(t) - dayStart(attemptTime(p))) / DAY_MS));
           add('prevAdj', adjustedAt(p, t));
           add('prevCnt', countAdjustedAt(p, i, t));
+          add('prevCpx', complexScoreOf(atts.slice(0, i), t));
           add('sumRaw', atts.slice(0, i).reduce((s, q) => s + q.score, 0));
         }
         if (i >= 2) add('drop2', atts[i-2].score - atts[i-1].score);
@@ -2603,7 +2648,7 @@ function buildScatterSVG(pts, title, xLabel) {
     grid += `<line x1="${mL}" y1="${Y(v).toFixed(1)}" x2="${mL+plotW}" y2="${Y(v).toFixed(1)}" stroke="rgba(255,255,255,.07)"/>`;
     grid += `<text x="${mL-5}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end" class="ax">${v}</text>`;
   }
-  const xStep = niceStep(xMax - xMin, [1, 2, 5, 10, 20, 25, 50, 100, 200]);
+  const xStep = niceStep(xMax - xMin, [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000]);
   for (let v = Math.ceil(xMin / xStep) * xStep; v <= xMax; v += xStep) {
     grid += `<text x="${X(v).toFixed(1)}" y="${mT+plotH+15}" text-anchor="middle" class="ax">${Math.round(v*10)/10}</text>`;
   }
@@ -2627,7 +2672,7 @@ function renderPredictors() {
       <option value="r2t"${predDir==='r2t'?' selected':''}>📖 referanse → tekst</option>
       <option value="t2r"${predDir==='t2r'?' selected':''}>🔖 tekst → referanse</option>
       <option value="all"${predDir==='all'?' selected':''}>Begge</option></select></label></div>`;
-  const caption = '<div class="overview-caption">Hver prikk er ett forsøk. Y = oppnådd score. Stiplet linje = lineær trend. Første forsøk for hvert vers har ingen «forrige» verdi og utelates fra plott 2–7.</div>';
+  const caption = '<div class="overview-caption">Hver prikk er ett forsøk. Y = oppnådd score. Stiplet linje = lineær trend. Første forsøk for hvert vers har ingen «forrige» verdi og utelates fra plott 2–8.</div>';
   document.getElementById('chart-body').innerHTML = sel + caption +
     buildScatterSVG(P.attempts,  '1. Antall forsøk før dette forsøket', 'Antall tidligere forsøk') +
     buildScatterSVG(P.prevScore, '2. Forrige forsøks score', 'Score på forrige forsøk (%)') +
@@ -2635,7 +2680,8 @@ function renderPredictors() {
     buildScatterSVG(P.prevAdj,   '4. Tidsjustert score (forrige forsøk, målt ved dette forsøket)', 'Tidsjustert score rett før forsøket (%)') +
     buildScatterSVG(P.drop2,     '5. Reduksjon i score: 2 forsøk siden → forrige forsøk', 'Score(n−2) − Score(n−1)  (positiv = falt)') +
     buildScatterSVG(P.prevCnt,   '6. Antall- og tidsjustert score (forrige forsøk, målt ved dette forsøket)', 'Antall- og tidsjustert score rett før forsøket (%)') +
-    buildScatterSVG(P.sumRaw,    '7. Sum av rå score for alle tidligere forsøk', 'Sum av rå score for tidligere forsøk (%-poeng)');
+    buildScatterSVG(P.sumRaw,    '7. Sum av rå score for alle tidligere forsøk', 'Sum av rå score for tidligere forsøk (%-poeng)') +
+    buildScatterSVG(P.prevCpx,   '8. Kompleks-justert score (før dette forsøket)', 'Kompleks-justert score rett før forsøket');
 }
 
 function openPredictorModal() {
