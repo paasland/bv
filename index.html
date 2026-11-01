@@ -434,6 +434,7 @@
       <label>Hemmelig sti</label>
       <div style="display:flex;gap:6px">
         <input type="password" id="cfg-fb-secret" placeholder="en lang, tilfeldig tekst" autocomplete="off" style="flex:1">
+        <button class="btn-modal-test" onclick="toggleFbSecretVisible()" title="Vis/skjul hemmelig sti">👁</button>
         <button class="btn-modal-test" onclick="generateFbSecret()" title="Generer en tilfeldig hemmelig sti">🎲</button>
       </div>
       <div class="modal-btns">
@@ -922,6 +923,11 @@ function openSettings() {
   document.getElementById('admin-section').classList.toggle('hidden', !isAdminProfile());
   if (isAdminProfile()) refreshAdminStats();
   document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+function toggleFbSecretVisible() {
+  const el = document.getElementById('cfg-fb-secret');
+  el.type = el.type === 'password' ? 'text' : 'password';
 }
 
 function generateFbSecret() {
