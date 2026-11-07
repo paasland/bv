@@ -1147,14 +1147,15 @@ const DAY_MS = 86400000;
 function dayStart(ms) { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
 
 // Complex-adjusted score: (sum of raw scores of all tests) − (days since latest test)
-// + (number of tests) + (raw score of latest test), never below 0. Not a percentage.
+// + (number of tests) + 2×(raw score of latest test) + 2×(worst raw score), never below 0. Not a percentage.
 // This is the score shown and used for picking the next verse.
 function complexScoreOf(atts, whenMs) {
   if (!atts.length) return 0;
   const last = atts[atts.length - 1];
   const sum = atts.reduce((s, a) => s + a.score, 0);
   const days = Math.max(0, Math.round((dayStart(whenMs) - dayStart(attemptTime(last))) / DAY_MS));
-  return Math.max(0, sum - days + atts.length + last.score);
+  const worst = Math.min(...atts.map(a => a.score));
+  return Math.max(0, sum - days + atts.length + 2 * last.score + 2 * worst);
 }
 function sortedAttempts(entry) {
   return ensureAttempts(entry).filter(a => a && typeof a.score === 'number')
@@ -1785,7 +1786,7 @@ function dirCellHTML(ref, dir, sRef) {
   const tip = entry ? 'Klikk for å se utvikling over tid' : 'Ikke testet ennå (teller som 0 %)';
   return `<div class="h-dir${clickable}" data-ref="${sRef}" data-dir="${dir}" title="${tip}">
     <div class="h-dir-icon" title="${meta.dirLabel}">${meta.icon}</div>
-    <div class="h-score ${scoreClass(raw)}" title="Kompleks-justert score (sum av alle scorer − dager + antall forsøk + siste score)">⏱ ${fmtComplex(adj)}</div>
+    <div class="h-score ${scoreClass(raw)}" title="Kompleks-justert score (sum av alle scorer − dager + antall forsøk + 2×siste score + 2×dårligste score)">⏱ ${fmtComplex(adj)}</div>
     <div class="h-score-adj ${scoreClass(raw)}" title="Siste faktiske score">${raw}%</div>
     <div class="h-dir-date">${date}</div>
   </div>`;
